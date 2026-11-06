@@ -235,3 +235,12 @@ export function isLikelyRing(name: string | null | undefined): boolean {
   if (!name) return false;
   return /colmi|qring|r0\d|smart\s*ring/i.test(name);
 }
+
+function normalizeUuid(value: string): string {
+  return value.replace(/-/g, '').toLowerCase();
+}
+
+export function advertisesColmiService(serviceUuids: string[] | null | undefined): boolean {
+  const colmi = normalizeUuid(UART_SERVICE_UUID);
+  return (serviceUuids ?? []).some((uuid) => normalizeUuid(uuid) === colmi);
+}

@@ -5,33 +5,12 @@ This app runs on an iPhone. It reads the Colmi R09 over unencrypted BLE GATT, ke
 
 The iOS binary is built in the cloud with EAS, uploaded to App Store Connect, and attached to the TestFlight group named Internal. GitHub Actions does that on every push to main that changes code, and again on the 1st of every other month so the TestFlight build is refreshed before the 90-day expiry. GitHub's scheduler has no "every 60 days" interval, so every other month is the schedule.
 
-What you still need to fill in
-------------------------------
-
-1. Expo account. Create a token at https://expo.dev/accounts/[your-account]/settings/access-tokens
-   GitHub secret name: EXPO_TOKEN
-
-2. Apple Team ID, from https://developer.apple.com/account (Membership details).
-   GitHub secret name: APPLE_TEAM_ID
-
-3. An App Store Connect app whose bundle id is com.sameer.blescraper.
-   The Apple ID number is on the app's App Information page (a numeric id, not the bundle id).
-   GitHub secret name: ASC_APP_ID
-   Change the bundle id in app.json before the first App Store Connect app exists if you want a different one.
-
-4. A TestFlight internal group named exactly Internal, with your Apple ID as a tester.
-   Turn on automatic distribution for that group. Internal testers do not need Beta App Review.
-
-5. An App Store Connect API key (.p8, key id, issuer id) with App Manager access.
-   Store it with EAS once, from this repo, after `npx eas-cli login`:
-
-   npx eas-cli credentials --platform ios
-
-   Choose the production profile, then App Store Connect API key. The GitHub Action uses the key stored on Expo's servers. Do not commit the .p8 file.
-
-6. The Arduino URL, entered in the app under API settings. Example: http://203.0.113.10:8080/ingest
+FOR API/IP FORWARDING USAGE.
+The Arduino URL, entered in the app under API settings. 
+Example: http://203.0.113.10:8080/ingest
    The phone allows plain HTTP because the home server is not required to have a certificate.
    Optional API key is sent as the X-Api-Key header.
+
 
 Install
 -------
@@ -50,16 +29,19 @@ Day-to-day JS check, from Windows:
 
 Bluetooth is a native module, so Expo Go cannot talk to the ring. A development or TestFlight build is required on the phone. This PC cannot compile the iOS app locally. EAS builds it.
 
-First cloud build
+First production cloud build
 -----------------
 
-    npx eas-cli login
-    npx eas-cli init
-    npx eas-cli build --platform ios --profile production
+    npx eas-cli login (verifies user credentials)
+    npx eas-cli init (initializes production and writes project id)
+    npx eas-cli build --platform ios --profile production (creates a cloud build)
 
-`eas init` writes the Expo project id into app.json. Commit that change. The first build asks Apple credential questions and saves them for the GitHub Action. After it finishes:
+The first build asks Apple credential questions and saves them for the GitHub Action. 
+After it finishes:
 
     npx eas-cli submit --platform ios --profile production --latest
+
+eas.json does not contain the App Store Connect app id or the Apple Team ID. EAS cannot read those two fields from environment variables. For a local submit, set ASC_APP_ID and APPLE_TEAM_ID in the shell, run node scripts/write-submit-ids.mjs, then submit. Do not commit the eas.json change that script makes.
 
 Confirm the build shows up in TestFlight and installs on the phone. Later pushes to main do this from GitHub Actions.
 
@@ -68,13 +50,13 @@ GitHub Action
 
 Workflow: .github/workflows/testflight.yml
 
-Repository secrets:
+Repository secrets, used only on the GitHub runner:
 
     EXPO_TOKEN
     ASC_APP_ID
     APPLE_TEAM_ID
 
-The job runs `eas build --platform ios --profile production --auto-submit`. EAS builds the IPA, then submits it to TestFlight when the build finishes. The action does not wait for the compile, so GitHub minutes stay short. You can also run it by hand from the Actions tab.
+The job writes the two Apple ids into its checkout of eas.json, then runs `eas build --platform ios --profile production --auto-submit`. That copy of the file is discarded with the runner. EAS builds the IPA, then submits it to TestFlight when the build finishes. The action does not wait for the compile, so GitHub minutes stay short. You can also run it by hand from the Actions tab.
 
 Scheduled runs only happen from the default branch, which is main.
 

@@ -9,6 +9,8 @@ import {
   CMD_SET_TIME,
   HeartRateLogParser,
   SportDetailParser,
+  UART_SERVICE_UUID,
+  advertisesColmiService,
   parseBattery,
   parseRealtime,
   setTimePacket,
@@ -118,6 +120,12 @@ test('realtime packet distinguishes a reading from an error', () => {
     reading: 1,
     code: 2,
   });
+});
+
+test('Colmi service matching ignores case and dashes', () => {
+  assert.equal(advertisesColmiService([UART_SERVICE_UUID.toLowerCase()]), true);
+  assert.equal(advertisesColmiService(['6e40fff0b5a3f393e0a9e50e24dcca9e']), true);
+  assert.equal(advertisesColmiService(['0000180a-0000-1000-8000-00805f9b34fb']), false);
 });
 
 test('base64 round-trips a 16-byte packet', () => {

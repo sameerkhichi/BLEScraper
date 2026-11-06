@@ -20,3 +20,4 @@ Notes
 - EAS Build will upload the ipa build to app store connect
 - App store connect will automatically add the app to testflight and will install on my phone
 - Testflight expires every 90 days. Will add a GitHub action to refresh the build every 60 days or on push to update code.
+-Expo is run through my main email on google sign on.

@@ -40,18 +40,11 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Require App Store Connect settings
+      - name: Write App Store ids into eas.json
         env:
           ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-        run: |
-          if [ -z "$ASC_APP_ID" ] || [ -z "$APPLE_TEAM_ID" ]; then
-            echo "Add ASC_APP_ID and APPLE_TEAM_ID repository secrets before this job can submit to TestFlight."
-            exit 1
-          fi
+        run: node scripts/write-submit-ids.mjs
 
       - name: Build and submit to TestFlight
-        env:
-          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: eas build --platform ios --profile production --non-interactive --auto-submit --no-wait
