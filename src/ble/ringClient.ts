@@ -10,7 +10,6 @@ import {
   CMD_BATTERY,
   CMD_RAW_SENSOR,
   CMD_READ_HEART_RATE,
-  CMD_REAL_TIME_HEART_RATE,
   CMD_SET_TIME,
   CMD_START_REAL_TIME,
   CMD_STEPS,
@@ -32,7 +31,6 @@ import {
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
-  realtimeHeartRatePacket,
   readHeartRatePacket,
   readStepsPacket,
   setTimePacket,
@@ -82,6 +80,7 @@ function delay(ms: number): Promise<void> {
 export class RingClient {
   private subscription: Subscription | null = null;
   private notifying = false;
+  private open = true;
   private disconnectSubscription: Subscription | null = null;
   private listeners = new Map<number, (packet: Uint8Array) => void>();
   private aborts = new Set<(error: Error) => void>();
@@ -129,6 +128,8 @@ export class RingClient {
       },
     );
     client.disconnectSubscription = device.onDisconnected((error) => {
+      client.open = false;
+      forgetRingSession(client);
       debugLog(error?.message ? `Link dropped ${deviceId}: ${error.message}` : `Link closed ${deviceId}`);
       client.failAll(new Error(error?.message ? `The ring disconnected. ${error.message}` : 'The ring disconnected.'));
     });
@@ -138,7 +139,10 @@ export class RingClient {
 
   async disconnect(): Promise<void> {
     debugLog(`Disconnecting ${this.device.id}`);
+    this.open = false;
     this.notifying = false;
+    forgetRingSession(this);
+    this.failAll(new Error('The ring disconnected.'));
     this.subscription?.remove();
     this.disconnectSubscription?.remove();
     this.subscription = null;
@@ -148,6 +152,19 @@ export class RingClient {
       await this.device.cancelConnection();
     } catch {
       // The link is already closed.
+    }
+  }
+
+  isLive(): boolean {
+    return this.open;
+  }
+
+  async connected(): Promise<boolean> {
+    if (!this.open) return false;
+    try {
+      return await this.device.isConnected();
+    } catch {
+      return false;
     }
   }
 
@@ -254,56 +271,38 @@ export class RingClient {
   private async collectHeartRate(timeoutMs: number): Promise<number | null> {
     const readings: number[] = [];
     let lastPacket: Uint8Array | null = null;
-    let poll: ReturnType<typeof setInterval> | null = null;
-    const commands = [CMD_START_REAL_TIME, CMD_REAL_TIME_HEART_RATE];
-
-    const stopPolling = () => {
-      if (!poll) return;
-      clearInterval(poll);
-      poll = null;
-    };
 
     try {
       await new Promise<void>((resolve, reject) => {
         let settled = false;
         const timer = setTimeout(() => complete(), timeoutMs);
-        const finish = (rejectWith?: Error) => {
+        const complete = () => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          stopPolling();
-          commands.forEach((command) => this.listeners.delete(command));
+          this.listeners.delete(CMD_START_REAL_TIME);
           this.aborts.delete(abort);
-          if (rejectWith) reject(rejectWith);
-          else resolve();
+          resolve();
         };
-        const complete = () => finish();
-        const abort = (error: Error) => finish(error);
-        const take = (packet: Uint8Array) => {
+        const abort = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          this.listeners.delete(CMD_START_REAL_TIME);
+          this.aborts.delete(abort);
+          reject(error);
+        };
+        this.aborts.add(abort);
+        this.listeners.set(CMD_START_REAL_TIME, (packet) => {
           lastPacket = packet;
           const bpm = parseLiveHeartRate(packet);
           if (bpm === null) return;
           readings.push(bpm);
-          if (readings.length >= 1) complete();
-        };
-
-        this.aborts.add(abort);
-        commands.forEach((command) => this.listeners.set(command, take));
-        poll = setInterval(() => {
-          if (readings.length > 0) return;
-          this.send(realtimeHeartRatePacket()).catch(() => undefined);
-        }, 3000);
-        this.send(startRealtimePacket(REALTIME_HEART_RATE))
-          .then(async () => {
-            await delay(400);
-            if (settled) return;
-            await this.send(realtimeHeartRatePacket());
-          })
-          .catch(abort);
+          complete();
+        });
+        this.send(startRealtimePacket(REALTIME_HEART_RATE)).catch(abort);
       });
     } finally {
-      stopPolling();
-      commands.forEach((command) => this.listeners.delete(command));
       try {
         await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
       } catch {
@@ -457,4 +456,36 @@ export class RingClient {
       },
     );
   }
+}
+
+type OpenSession = { ringId: string; client: RingClient };
+let openSession: OpenSession | null = null;
+
+function forgetRingSession(client: RingClient): void {
+  if (openSession?.client === client) openSession = null;
+}
+
+export function hasOpenRing(ringId: string): boolean {
+  return openSession?.ringId === ringId && openSession.client.isLive();
+}
+
+export async function openRing(ringId: string): Promise<RingClient> {
+  const current = openSession;
+  if (current?.ringId === ringId && (await current.client.connected())) {
+    debugLog(`Reusing connection ${ringId}`);
+    return current.client;
+  }
+  await closeRing();
+  const client = await RingClient.connect(ringId);
+  openSession = { ringId, client };
+  return client;
+}
+
+export async function closeRing(ringId?: string): Promise<boolean> {
+  const current = openSession;
+  if (!current) return false;
+  if (ringId && current.ringId !== ringId) return false;
+  openSession = null;
+  await current.client.disconnect();
+  return true;
 }

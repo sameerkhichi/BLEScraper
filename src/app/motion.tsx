@@ -2,7 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
-import { RingClient } from '../ble/ringClient';
+import { openRing } from '../ble/ringClient';
 import type { RawSensorFrame } from '../ble/protocol';
 import { Button, Card, colors } from '../components/ui';
 import type { AccelSample } from '../model';
@@ -43,28 +43,22 @@ export default function MotionScreen() {
     const ringId = settings.ringId;
     setError(null);
     setPhase('connecting');
-    const session = { cancel: false, client: null as RingClient | null };
+    const session = { cancel: false, stop: null as (() => void) | null };
     stopRef.current = () => {
       session.cancel = true;
-      session.client?.stopMotion();
+      session.stop?.();
     };
 
     try {
       await withRing(async () => {
-        let client: RingClient | null = null;
-        try {
-          client = await RingClient.connect(ringId);
-          session.client = client;
-          if (session.cancel) return;
-          if (mounted.current) setPhase('live');
-          await client.watchMotion((frame) => {
-            if (!mounted.current) return;
-            applyFrame(frame, setSample, setHistory, setPpg, setOptical);
-          });
-        } finally {
-          session.client = null;
-          if (client) await client.disconnect();
-        }
+        const client = await openRing(ringId);
+        session.stop = () => client.stopMotion();
+        if (session.cancel) return;
+        if (mounted.current) setPhase('live');
+        await client.watchMotion((frame) => {
+          if (!mounted.current) return;
+          applyFrame(frame, setSample, setHistory, setPpg, setOptical);
+        });
       });
     } catch (caught) {
       if (mounted.current && !session.cancel) {

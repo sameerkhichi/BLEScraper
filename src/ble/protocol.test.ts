@@ -18,7 +18,6 @@ import {
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
-  realtimeHeartRatePacket,
   REALTIME_TEMPERATURE,
   setTimePacket,
   startRealtimePacket,
@@ -135,12 +134,8 @@ test('live heart rate accepts the BPM wherever this ring places it', () => {
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 1, 1, 72)), 72);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 1, 72, 0)), 72);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 6, 0, 68)), 68);
-  assert.equal(parseLiveHeartRate(Uint8Array.of(30, 72)), 72);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 1, 2, 0)), null);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 3, 0, 98)), null);
-  const poll = realtimeHeartRatePacket();
-  assert.deepEqual(Array.from(poll.slice(0, 2)), [30, 3]);
-  assert.equal(isValidPacket(poll), true);
 });
 
 test('temperature and blood oxygen use their own realtime types', () => {

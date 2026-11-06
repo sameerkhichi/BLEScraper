@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { debugLog } from '../ble/debugLog';
+import { closeRing } from '../ble/ringClient';
 import { getBleManager } from '../ble/manager';
 import { mergeReadings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
@@ -134,6 +135,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const releaseRing = useCallback(async (ringId: string | null) => {
     if (!ringId) return;
+    if (await closeRing(ringId)) return;
     try {
       await getBleManager().cancelDeviceConnection(ringId);
       debugLog(`Cancelled connection ${ringId}`);
