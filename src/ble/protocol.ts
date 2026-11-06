@@ -1,4 +1,4 @@
-import type { BatteryReading, HeartRateSample, StepSample } from '../model';
+import type { AccelReading, BatteryReading, HeartRateSample, StepSample } from '../model';
 import { bcdToDecimal, byteToBcd, makePacket, readInt32LE, writeInt32LE } from './packet';
 
 export const UART_SERVICE_UUID = '6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E';
@@ -11,7 +11,12 @@ export const CMD_READ_HEART_RATE = 21;
 export const CMD_STEPS = 67;
 export const CMD_START_REAL_TIME = 105;
 export const CMD_STOP_REAL_TIME = 106;
+export const CMD_RAW_SENSOR = 0xa1;
+export const RAW_SENSOR_ENABLE = 0x04;
+export const RAW_SENSOR_DISABLE = 0x02;
 export const REALTIME_HEART_RATE = 1;
+export const REALTIME_SPO2 = 3;
+export const REALTIME_TEMPERATURE = 0x0b;
 
 const ACTION_START = 1;
 
@@ -71,6 +76,63 @@ export function parseRealtime(packet: Uint8Array):
     return { kind: 'error', reading: packet[1], code: packet[2] };
   }
   return { kind: 'reading', reading: packet[1], value: packet[3] };
+}
+
+export function isPlausibleHeartRate(value: number): boolean {
+  return value >= 30 && value <= 220;
+}
+
+export function isPlausibleSpo2(value: number): boolean {
+  return value >= 70 && value <= 100;
+}
+
+// Stored as tenths above a 20°C offset: 154 -> 35.4°C. Values under 11 are still warming up.
+export function bodyTemperatureCelsius(raw: number): number | null {
+  if (raw < 11) return null;
+  const celsius = Math.round((raw / 10 + 20) * 10) / 10;
+  if (celsius < 28 || celsius > 43) return null;
+  return celsius;
+}
+
+export function rawSensorPacket(action: number): Uint8Array {
+  return makePacket(CMD_RAW_SENSOR, [action]);
+}
+
+export type RawSensorFrame =
+  | { kind: 'accelerometer'; reading: AccelReading }
+  | { kind: 'ppg'; value: number; max: number; min: number; diff: number }
+  | { kind: 'optical'; value: number };
+
+export function parseRawSensor(packet: Uint8Array): RawSensorFrame | null {
+  if (packet[0] !== CMD_RAW_SENSOR) return null;
+  if (packet[1] === 3) {
+    return {
+      kind: 'accelerometer',
+      reading: {
+        x: signed12((packet[6] << 4) | (packet[7] & 0x0f)) / 512,
+        y: signed12((packet[2] << 4) | (packet[3] & 0x0f)) / 512,
+        z: signed12((packet[4] << 4) | (packet[5] & 0x0f)) / 512,
+      },
+    };
+  }
+  if (packet[1] === 2) {
+    return {
+      kind: 'ppg',
+      value: (packet[2] << 8) | packet[3],
+      max: (packet[4] << 8) | packet[5],
+      min: (packet[6] << 8) | packet[7],
+      diff: (packet[8] << 8) | packet[9],
+    };
+  }
+  if (packet[1] === 1) {
+    return { kind: 'optical', value: (packet[2] << 8) | packet[3] };
+  }
+  return null;
+}
+
+function signed12(value: number): number {
+  const raw = value & 0xfff;
+  return raw >= 0x800 ? raw - 0x1000 : raw;
 }
 
 export class HeartRateLogParser {

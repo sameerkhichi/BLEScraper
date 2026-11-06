@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { defaultSettings, type AppSettings, type UploadPayload } from '../model';
+import { defaultSettings, isAccelSample, type AppSettings, type UploadPayload } from '../model';
 import type { PendingUpload } from './queue';
 
 const SETTINGS_KEY = 'blescraper.settings';
@@ -37,7 +37,13 @@ export async function saveQueue(queue: PendingUpload[]): Promise<void> {
 export async function loadLastPayload(): Promise<UploadPayload | null> {
   const raw = await AsyncStorage.getItem(LAST_KEY);
   if (!raw) return null;
-  return JSON.parse(raw) as UploadPayload;
+  const parsed = JSON.parse(raw) as UploadPayload;
+  return {
+    ...parsed,
+    spo2: typeof parsed.spo2 === 'number' ? parsed.spo2 : null,
+    bodyTemperatureC: typeof parsed.bodyTemperatureC === 'number' ? parsed.bodyTemperatureC : null,
+    accelerometer: isAccelSample(parsed.accelerometer) ? parsed.accelerometer : null,
+  };
 }
 
 export async function saveLastPayload(payload: UploadPayload): Promise<void> {

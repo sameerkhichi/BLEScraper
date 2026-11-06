@@ -1,8 +1,8 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
-import type { AppSettings, UploadPayload } from '../model';
+import { mergeReadings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
 import {
   loadLastPayload,
@@ -12,7 +12,7 @@ import {
   saveQueue,
   saveSettings,
 } from '../sync/storage';
-import { measureRing, syncRing } from '../sync/syncRing';
+import { readingPayload, scanRing, syncRing } from '../sync/syncRing';
 import { postPayload } from '../sync/upload';
 
 type AppContextValue = {
@@ -26,7 +26,9 @@ type AppContextValue = {
   selectRing: (ringId: string, ringName: string | null) => Promise<void>;
   forgetRing: () => Promise<void>;
   sync: () => Promise<void>;
-  measure: () => Promise<void>;
+  scan: (kind: ScanKind) => Promise<void>;
+  recordMotion: (sample: AccelSample) => Promise<void>;
+  withRing: <T>(action: () => Promise<T>) => Promise<T>;
   sendPending: () => Promise<void>;
 };
 
@@ -44,6 +46,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   });
   const [queue, setQueue] = useState<PendingUpload[]>([]);
   const [lastPayload, setLastPayload] = useState<UploadPayload | null>(null);
+  const ringUse = useRef(0);
 
   const publishQueue = useCallback(async (next: PendingUpload[]) => {
     setQueue(next);
@@ -105,6 +108,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await saveLastPayload(payload);
   }, []);
 
+  const withRing = useCallback(async <T,>(action: () => Promise<T>): Promise<T> => {
+    ringUse.current += 1;
+    setBusy(true);
+    try {
+      return await action();
+    } finally {
+      ringUse.current = Math.max(0, ringUse.current - 1);
+      if (ringUse.current === 0) setBusy(false);
+    }
+  }, []);
+
   const saveAppSettings = useCallback(
     async (next: AppSettings) => {
       setSettings(next);
@@ -157,46 +171,58 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setStatus('Choose the ring first.');
       return;
     }
-    setBusy(true);
-    try {
-      const payload = await syncRing(settings.ringId, settings.ringName, setStatus);
-      await remember(payload);
-      const nextQueue = enqueue(queue, payload);
-      await publishQueue(nextQueue);
-      await sendQueue(nextQueue, settings);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sync failed.';
-      debugLog(message);
-      setStatus(message);
-    } finally {
-      setBusy(false);
-    }
-  }, [publishQueue, queue, remember, sendQueue, settings]);
+    await withRing(async () => {
+      try {
+        const payload = await syncRing(settings.ringId!, settings.ringName, setStatus);
+        await remember(mergeReadings(lastPayload, payload, false));
+        const nextQueue = enqueue(queue, payload);
+        await publishQueue(nextQueue);
+        await sendQueue(nextQueue, settings);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Sync failed.';
+        debugLog(message);
+        setStatus(message);
+      }
+    });
+  }, [lastPayload, publishQueue, queue, remember, sendQueue, settings, withRing]);
 
-  const measure = useCallback(async () => {
+  const scan = useCallback(async (kind: ScanKind) => {
     if (!settings.ringId) {
       setStatus('Choose the ring first.');
       return;
     }
-    setBusy(true);
-    try {
-      const payload = await measureRing(settings.ringId, settings.ringName, setStatus);
-      await remember(payload);
-      if (payload.realtimeHeartRate === null) {
-        setStatus(payload.warnings[0] ?? 'No live heart-rate reading.');
-        return;
+    await withRing(async () => {
+      try {
+        const payload = await scanRing(settings.ringId!, settings.ringName, kind, setStatus);
+        const succeeded =
+          payload.realtimeHeartRate !== null || payload.spo2 !== null || payload.bodyTemperatureC !== null;
+        if (!succeeded) {
+          setStatus(payload.warnings.join(' ') || 'The ring did not return a reading.');
+          return;
+        }
+        await remember(mergeReadings(lastPayload, payload, true));
+        const nextQueue = enqueue(queue, payload);
+        await publishQueue(nextQueue);
+        await sendQueue(nextQueue, settings);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Measurement failed.';
+        debugLog(message);
+        setStatus(message);
       }
-      const nextQueue = enqueue(queue, payload);
-      await publishQueue(nextQueue);
-      await sendQueue(nextQueue, settings);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Measurement failed.';
-      debugLog(message);
-      setStatus(message);
-    } finally {
-      setBusy(false);
+    });
+  }, [lastPayload, publishQueue, queue, remember, sendQueue, settings, withRing]);
+
+  const recordMotion = useCallback(async (sample: AccelSample) => {
+    if (!settings.ringId) {
+      setStatus('Choose the ring first.');
+      return;
     }
-  }, [publishQueue, queue, remember, sendQueue, settings]);
+    const payload = readingPayload(settings.ringId, settings.ringName, { accelerometer: sample });
+    await remember(mergeReadings(lastPayload, payload, true));
+    const nextQueue = enqueue(queue, payload);
+    await publishQueue(nextQueue);
+    await sendQueue(nextQueue, settings);
+  }, [lastPayload, publishQueue, queue, remember, sendQueue, settings]);
 
   const sendPending = useCallback(async () => {
     setBusy(true);
@@ -223,7 +249,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectRing,
       forgetRing,
       sync,
-      measure,
+      scan,
+      recordMotion,
+      withRing,
       sendPending,
     }),
     [
@@ -237,7 +265,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       selectRing,
       forgetRing,
       sync,
-      measure,
+      scan,
+      recordMotion,
+      withRing,
       sendPending,
     ],
   );

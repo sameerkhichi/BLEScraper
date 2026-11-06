@@ -5,21 +5,32 @@ import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
 import { getBleManager } from './manager';
 import { isValidPacket } from './packet';
+import type { RawSensorFrame } from './protocol';
 import {
   CMD_BATTERY,
+  CMD_RAW_SENSOR,
   CMD_READ_HEART_RATE,
   CMD_SET_TIME,
   CMD_START_REAL_TIME,
   CMD_STEPS,
   HeartRateLogParser,
+  RAW_SENSOR_DISABLE,
+  RAW_SENSOR_ENABLE,
   REALTIME_HEART_RATE,
+  REALTIME_SPO2,
+  REALTIME_TEMPERATURE,
   SportDetailParser,
   UART_RX_UUID,
   UART_SERVICE_UUID,
   UART_TX_UUID,
   batteryPacket,
+  bodyTemperatureCelsius,
+  isPlausibleHeartRate,
+  isPlausibleSpo2,
   parseBattery,
+  parseRawSensor,
   parseRealtime,
+  rawSensorPacket,
   readHeartRatePacket,
   readStepsPacket,
   setTimePacket,
@@ -41,6 +52,7 @@ export class RingClient {
   private disconnectSubscription: Subscription | null = null;
   private listeners = new Map<number, (packet: Uint8Array) => void>();
   private aborts = new Set<(error: Error) => void>();
+  private motionStop: (() => void) | null = null;
   private tail: Promise<void> = Promise.resolve();
 
   private constructor(private device: Device) {}
@@ -141,11 +153,77 @@ export class RingClient {
   }
 
   async measureHeartRate(): Promise<number | null> {
+    return this.run(() => this.collectRealtime(REALTIME_HEART_RATE, isPlausibleHeartRate, 20000));
+  }
+
+  async measureBloodOxygen(): Promise<number | null> {
+    return this.run(() => this.collectRealtime(REALTIME_SPO2, isPlausibleSpo2, 30000));
+  }
+
+  async measureBodyTemperature(): Promise<number | null> {
     return this.run(async () => {
-      const readings: number[] = [];
+      const raw = await this.collectRealtime(
+        REALTIME_TEMPERATURE,
+        (value) => bodyTemperatureCelsius(value) !== null,
+        30000,
+      );
+      return raw === null ? null : bodyTemperatureCelsius(raw);
+    });
+  }
+
+  async watchMotion(onFrame: (frame: RawSensorFrame) => void): Promise<void> {
+    return this.run(async () => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            this.motionStop = null;
+            this.listeners.delete(CMD_RAW_SENSOR);
+            this.aborts.delete(abort);
+            resolve();
+          };
+          const abort = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            this.motionStop = null;
+            this.listeners.delete(CMD_RAW_SENSOR);
+            this.aborts.delete(abort);
+            reject(error);
+          };
+          this.aborts.add(abort);
+          this.motionStop = finish;
+          this.listeners.set(CMD_RAW_SENSOR, (packet) => {
+            const frame = parseRawSensor(packet);
+            if (frame) onFrame(frame);
+          });
+          this.send(rawSensorPacket(RAW_SENSOR_ENABLE)).catch(abort);
+        });
+      } finally {
+        try {
+          await this.send(rawSensorPacket(RAW_SENSOR_DISABLE));
+        } catch {
+          // The stream has already ended.
+        }
+      }
+    });
+  }
+
+  stopMotion(): void {
+    this.motionStop?.();
+  }
+
+  private async collectRealtime(
+    readingType: number,
+    accept: (value: number) => boolean,
+    timeoutMs: number,
+  ): Promise<number | null> {
+    const readings: number[] = [];
+    try {
       await new Promise<void>((resolve, reject) => {
         let settled = false;
-        const timer = setTimeout(() => complete(), 20000);
+        const timer = setTimeout(() => complete(), timeoutMs);
         const complete = () => {
           if (settled) return;
           settled = true;
@@ -165,21 +243,21 @@ export class RingClient {
         this.aborts.add(abort);
         this.listeners.set(CMD_START_REAL_TIME, (packet) => {
           const parsed = parseRealtime(packet);
-          if (parsed.kind === 'error' || parsed.value < 30 || parsed.value > 220) return;
+          if (parsed.kind === 'error' || parsed.reading !== readingType || !accept(parsed.value)) return;
           readings.push(parsed.value);
           if (readings.length >= 2) complete();
         });
-        this.send(startRealtimePacket(REALTIME_HEART_RATE)).catch(abort);
+        this.send(startRealtimePacket(readingType)).catch(abort);
       });
-
+    } finally {
       try {
-        await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
+        await this.send(stopRealtimePacket(readingType));
       } catch {
         // A reading is still usable when the stop command fails.
       }
+    }
 
-      return readings.length === 0 ? null : readings[readings.length - 1];
-    });
+    return readings.length === 0 ? null : readings[readings.length - 1];
   }
 
   private run<T>(operation: () => Promise<T>): Promise<T> {
@@ -202,12 +280,14 @@ export class RingClient {
   private handleNotification(value: string): void {
     const packet = base64ToBytes(value);
     if (!isValidPacket(packet)) return;
-    if ((packet[0] & 0x80) !== 0) {
-      debugLog(`Ring ${this.device.id} rejected command ${packet[0] & 0x7f}`);
+    const command = packet[0];
+    // Raw sensor packets use 0xA1. That bit is an error flag on the lower command ids.
+    if (command !== CMD_RAW_SENSOR && (command & 0x80) !== 0) {
+      debugLog(`Ring ${this.device.id} rejected command ${command & 0x7f}`);
       this.failAll(new Error('The ring rejected a command.'));
       return;
     }
-    this.listeners.get(packet[0])?.(packet.subarray(0, 16));
+    this.listeners.get(command)?.(packet.subarray(0, 16));
   }
 
   private failAll(error: Error): void {

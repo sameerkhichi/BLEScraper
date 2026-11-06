@@ -22,6 +22,18 @@ export type StepSample = {
   distanceMeters: number;
 };
 
+export type AccelReading = {
+  x: number;
+  y: number;
+  z: number;
+};
+
+export type AccelSample = AccelReading & {
+  sampledAt: string;
+};
+
+export type ScanKind = 'heart-rate' | 'spo2' | 'temperature' | 'all';
+
 export type UploadPayload = {
   source: 'colmi-r09';
   syncedAt: string;
@@ -31,10 +43,42 @@ export type UploadPayload = {
   };
   battery: BatteryReading | null;
   realtimeHeartRate: number | null;
+  spo2: number | null;
+  bodyTemperatureC: number | null;
+  accelerometer: AccelSample | null;
   heartRate: HeartRateSample[];
   steps: StepSample[];
   warnings: string[];
 };
+
+export function isAccelSample(value: unknown): value is AccelSample {
+  if (!value || typeof value !== 'object') return false;
+  const sample = value as AccelSample;
+  return (
+    typeof sample.x === 'number' &&
+    typeof sample.y === 'number' &&
+    typeof sample.z === 'number' &&
+    typeof sample.sampledAt === 'string'
+  );
+}
+
+export function mergeReadings(
+  previous: UploadPayload | null,
+  next: UploadPayload,
+  keepHistory: boolean,
+): UploadPayload {
+  if (!previous) return next;
+  return {
+    ...next,
+    battery: next.battery ?? previous.battery,
+    realtimeHeartRate: next.realtimeHeartRate ?? previous.realtimeHeartRate,
+    spo2: next.spo2 ?? previous.spo2,
+    bodyTemperatureC: next.bodyTemperatureC ?? previous.bodyTemperatureC,
+    accelerometer: next.accelerometer ?? previous.accelerometer,
+    heartRate: keepHistory ? previous.heartRate : next.heartRate,
+    steps: keepHistory ? previous.steps : next.steps,
+  };
+}
 
 export const defaultSettings: AppSettings = {
   apiUrl: '',

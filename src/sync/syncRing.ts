@@ -1,4 +1,4 @@
-import type { UploadPayload } from '../model';
+import type { ScanKind, UploadPayload } from '../model';
 import { debugLog } from '../ble/debugLog';
 import { RingClient } from '../ble/ringClient';
 
@@ -49,6 +49,9 @@ export async function syncRing(
       ring: { id: ringId, name: ringName },
       battery,
       realtimeHeartRate: null,
+      spo2: null,
+      bodyTemperatureC: null,
+      accelerometer: null,
       heartRate,
       steps,
       warnings,
@@ -58,35 +61,91 @@ export async function syncRing(
   }
 }
 
-export async function measureRing(
+export function readingPayload(
   ringId: string,
   ringName: string | null,
+  patch: Partial<UploadPayload> = {},
+): UploadPayload {
+  return {
+    source: 'colmi-r09',
+    syncedAt: new Date().toISOString(),
+    battery: null,
+    realtimeHeartRate: null,
+    spo2: null,
+    bodyTemperatureC: null,
+    accelerometer: null,
+    heartRate: [],
+    steps: [],
+    warnings: [],
+    ...patch,
+    ring: { id: ringId, name: ringName },
+  };
+}
+
+export async function scanRing(
+  ringId: string,
+  ringName: string | null,
+  kind: ScanKind,
   onStatus: (message: string) => void,
 ): Promise<UploadPayload> {
   report(onStatus, 'Connecting to the ring');
   const client = await RingClient.connect(ringId);
+  const warnings: string[] = [];
+  let realtimeHeartRate: number | null = null;
+  let spo2: number | null = null;
+  let bodyTemperatureC: number | null = null;
+
   try {
-    report(onStatus, 'Measuring heart rate');
-    const realtimeHeartRate = await client.measureHeartRate();
-    debugLog(realtimeHeartRate === null ? 'No live heart-rate reading' : `Live heart rate ${realtimeHeartRate}`);
+    const wantHeart = kind === 'heart-rate' || kind === 'all';
+    const wantOxygen = kind === 'spo2' || kind === 'all';
+    const wantTemperature = kind === 'temperature' || kind === 'all';
+
+    if (wantHeart) {
+      report(onStatus, 'Measuring heart rate');
+      realtimeHeartRate = await client.measureHeartRate();
+      if (realtimeHeartRate === null) warnings.push('The ring did not return a heart-rate reading.');
+      else debugLog(`Live heart rate ${realtimeHeartRate}`);
+    }
+
+    if (wantOxygen) {
+      if (wantHeart) await delay(400);
+      report(onStatus, 'Measuring blood oxygen');
+      spo2 = await client.measureBloodOxygen();
+      if (spo2 === null) warnings.push('The ring did not return a blood-oxygen reading.');
+      else debugLog(`Blood oxygen ${spo2}%`);
+    }
+
+    if (wantTemperature) {
+      if (wantHeart || wantOxygen) await delay(400);
+      report(onStatus, 'Measuring body temperature');
+      bodyTemperatureC = await client.measureBodyTemperature();
+      if (bodyTemperatureC === null) warnings.push('The ring did not return a body-temperature reading.');
+      else debugLog(`Body temperature ${bodyTemperatureC}°C`);
+    }
+
     let battery = null;
     try {
       battery = await client.getBattery();
     } catch {
       battery = null;
     }
-    return {
-      source: 'colmi-r09',
-      syncedAt: new Date().toISOString(),
-      ring: { id: ringId, name: ringName },
+
+    if (warnings.length > 0) debugLog(warnings.join(' '));
+
+    return readingPayload(ringId, ringName, {
       battery,
       realtimeHeartRate,
-      heartRate: [],
-      steps: [],
-      warnings:
-        realtimeHeartRate === null ? ['The ring did not return a live heart-rate reading.'] : [],
-    };
+      spo2,
+      bodyTemperatureC,
+      warnings,
+    });
   } finally {
     await client.disconnect();
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }

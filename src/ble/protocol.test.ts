@@ -12,9 +12,14 @@ import {
   UART_SERVICE_UUID,
   advertisesColmiService,
   isLikelyRing,
+  bodyTemperatureCelsius,
   parseBattery,
+  parseRawSensor,
   parseRealtime,
+  rawSensorPacket,
+  REALTIME_TEMPERATURE,
   setTimePacket,
+  startRealtimePacket,
 } from './protocol';
 
 test('battery request checksum is the command byte', () => {
@@ -121,6 +126,30 @@ test('realtime packet distinguishes a reading from an error', () => {
     reading: 1,
     code: 2,
   });
+});
+
+test('temperature and blood oxygen use their own realtime types', () => {
+  const packet = startRealtimePacket(REALTIME_TEMPERATURE);
+  assert.deepEqual(Array.from(packet.slice(0, 3)), [105, 0x0b, 1]);
+  assert.equal(packet[15], 0x75);
+  assert.equal(bodyTemperatureCelsius(0), null);
+  assert.equal(bodyTemperatureCelsius(154), 35.4);
+  assert.equal(bodyTemperatureCelsius(255), null);
+});
+
+test('raw accelerometer packet decodes 12-bit axes in g', () => {
+  const packet = Uint8Array.of(161, 3, 0, 12, 31, 6, 251, 3, 0, 0, 0, 0, 0, 0, 0, 211);
+  assert.equal(isValidPacket(packet), true);
+  const frame = parseRawSensor(packet);
+  assert.equal(frame?.kind, 'accelerometer');
+  if (frame?.kind !== 'accelerometer') return;
+  assert.ok(Math.abs(frame.reading.y - 12 / 512) < 1e-9);
+  assert.ok(Math.abs(frame.reading.z - 502 / 512) < 1e-9);
+  assert.ok(Math.abs(frame.reading.x - -77 / 512) < 1e-9);
+
+  const ppg = parseRawSensor(Uint8Array.of(161, 2, 50, 94, 50, 118, 49, 30, 1, 88, 1, 0, 0, 0, 0, 132));
+  assert.deepEqual(ppg, { kind: 'ppg', value: 12894, max: 12918, min: 12574, diff: 344 });
+  assert.equal(rawSensorPacket(0x04)[1], 0x04);
 });
 
 test('QRing names such as COLMI_CA02 count as the ring', () => {

@@ -18,12 +18,25 @@ function latestSample(payload: UploadPayload | null): string | null {
   return `${sample.bpm} bpm at ${new Date(sample.timestamp).toLocaleString()}`;
 }
 
+function formatReading(value: number | null | undefined, suffix = ''): string {
+  return typeof value === 'number' ? `${value}${suffix}` : '—';
+}
+
 export default function HomeScreen() {
-  const { busy, status, settings, queue, lastPayload, sync, measure, sendPending, forgetRing } = useAppState();
+  const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing } = useAppState();
   const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
   const ringLabel = settings.ringName || settings.ringId || 'No ring selected';
   const apiLabel = settings.apiUrl.trim() || 'No API URL yet';
   const newestHeartRate = latestSample(lastPayload);
+  const motion = lastPayload?.accelerometer;
+
+  const requireRing = (action: () => void) => {
+    if (!settings.ringId) {
+      router.push('/scan');
+      return;
+    }
+    action();
+  };
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
@@ -71,10 +84,17 @@ export default function HomeScreen() {
       <Card>
         <Text style={styles.label}>Last reading</Text>
         <View style={styles.metrics}>
-          <Metric label="Live HR" value={lastPayload?.realtimeHeartRate ? `${lastPayload.realtimeHeartRate}` : '—'} />
+          <Metric label="Heart rate" value={formatReading(lastPayload?.realtimeHeartRate)} />
+          <Metric label="SpO2" value={formatReading(lastPayload?.spo2, '%')} />
+          <Metric label="Temp" value={typeof lastPayload?.bodyTemperatureC === 'number' ? `${lastPayload.bodyTemperatureC.toFixed(1)}°` : '—'} />
           <Metric label="HR samples" value={`${lastPayload?.heartRate.length ?? 0}`} />
           <Metric label="Steps" value={`${totalSteps(lastPayload)}`} />
         </View>
+        {motion ? (
+          <Text style={styles.meta}>
+            Accelerometer {motion.x.toFixed(2)} x, {motion.y.toFixed(2)} y, {motion.z.toFixed(2)} z g
+          </Text>
+        ) : null}
         {newestHeartRate ? <Text style={styles.meta}>Newest stored heart rate {newestHeartRate}</Text> : null}
         {lastPayload?.warnings.map((warning) => (
           <Text key={warning} style={styles.warning}>
@@ -82,7 +102,7 @@ export default function HomeScreen() {
           </Text>
         ))}
         <Text style={styles.meta}>
-          {lastPayload ? `Synced ${new Date(lastPayload.syncedAt).toLocaleString()}` : 'No sync yet.'}
+          {lastPayload ? `Updated ${new Date(lastPayload.syncedAt).toLocaleString()}` : 'No reading yet.'}
         </Text>
         <Text style={styles.meta}>Clock and history use UTC.</Text>
       </Card>
@@ -98,18 +118,13 @@ export default function HomeScreen() {
           void sync();
         }}
       />
-      <Button
-        disabled={busy}
-        label="Measure heart rate"
-        onPress={() => {
-          if (!settings.ringId) {
-            router.push('/scan');
-            return;
-          }
-          void measure();
-        }}
-        tone="secondary"
-      />
+      <Text style={styles.kicker}>Scans</Text>
+      <Text style={styles.meta}>Each option talks to a different sensor. All sensors runs heart rate, blood oxygen, and temperature one after another.</Text>
+      <Button disabled={busy} label="Measure heart rate" onPress={() => requireRing(() => void scan('heart-rate'))} tone="secondary" />
+      <Button disabled={busy} label="Measure blood oxygen" onPress={() => requireRing(() => void scan('spo2'))} tone="secondary" />
+      <Button disabled={busy} label="Measure body temperature" onPress={() => requireRing(() => void scan('temperature'))} tone="secondary" />
+      <Button disabled={busy} label="Scan all sensors" onPress={() => requireRing(() => void scan('all'))} />
+      <Button disabled={busy} label="Accelerometer" onPress={() => requireRing(() => router.push('/motion'))} tone="secondary" />
       <Button disabled={busy || queue.length === 0} label="Send waiting readings" onPress={() => void sendPending()} tone="secondary" />
 
       <Card>
@@ -189,11 +204,13 @@ const styles = StyleSheet.create({
   },
   metrics: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 12,
   },
   metric: {
-    flex: 1,
+    flexGrow: 1,
     gap: 2,
+    minWidth: '28%',
   },
   metricValue: {
     color: colors.text,
