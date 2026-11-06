@@ -2,6 +2,7 @@ import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 
 import type { BatteryReading, HeartRateSample, StepSample } from '../model';
 import { base64ToBytes, bytesToBase64 } from './base64';
+import { debugLog } from './debugLog';
 import { getBleManager } from './manager';
 import { isValidPacket } from './packet';
 import {
@@ -45,19 +46,42 @@ export class RingClient {
   private constructor(private device: Device) {}
 
   static async connect(deviceId: string): Promise<RingClient> {
+    debugLog(`Connecting ${deviceId}`);
     const manager = getBleManager();
-    const device = await manager.connectToDevice(deviceId, { timeout: 20000 });
-    await device.discoverAllServicesAndCharacteristics();
+    let device: Device;
+    try {
+      device = await manager.connectToDevice(deviceId, { timeout: 20000 });
+      await device.discoverAllServicesAndCharacteristics();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'connection failed';
+      debugLog(`Connect failed ${deviceId}: ${message}`);
+      throw error;
+    }
+
+    let services = 'services unavailable';
+    try {
+      const found = await device.services();
+      services = found.map((service) => service.uuid).join(', ') || 'no services';
+    } catch (error) {
+      services = error instanceof Error ? error.message : 'could not list services';
+    }
+    debugLog(`Connected ${deviceId}. ${services}`);
+
     const client = new RingClient(device);
     client.subscription = device.monitorCharacteristicForService(
       UART_SERVICE_UUID,
       UART_TX_UUID,
       (error, characteristic) => {
-        if (error || !characteristic?.value) return;
+        if (error) {
+          debugLog(`Notify error on ${deviceId}: ${error.message}`);
+          return;
+        }
+        if (!characteristic?.value) return;
         client.handleNotification(characteristic.value);
       },
     );
     client.disconnectSubscription = device.onDisconnected((error) => {
+      debugLog(error?.message ? `Link dropped ${deviceId}: ${error.message}` : `Link closed ${deviceId}`);
       client.failAll(new Error(error?.message ? `The ring disconnected. ${error.message}` : 'The ring disconnected.'));
     });
     await delay(300);
@@ -65,6 +89,7 @@ export class RingClient {
   }
 
   async disconnect(): Promise<void> {
+    debugLog(`Disconnecting ${this.device.id}`);
     this.subscription?.remove();
     this.disconnectSubscription?.remove();
     this.subscription = null;
@@ -178,6 +203,7 @@ export class RingClient {
     const packet = base64ToBytes(value);
     if (!isValidPacket(packet)) return;
     if ((packet[0] & 0x80) !== 0) {
+      debugLog(`Ring ${this.device.id} rejected command ${packet[0] & 0x7f}`);
       this.failAll(new Error('The ring rejected a command.'));
       return;
     }
@@ -204,6 +230,7 @@ export class RingClient {
         settled = true;
         this.listeners.delete(command);
         this.aborts.delete(abort);
+        debugLog(`Command ${command} on ${this.device.id} timed out after ${timeoutMs}ms`);
         reject(new Error('The ring did not answer in time.'));
       }, timeoutMs);
 

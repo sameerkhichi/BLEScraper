@@ -1,7 +1,10 @@
 import { router } from 'expo-router';
-import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useSyncExternalStore } from 'react';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 
+import { getDebugLines, subscribeDebugLog } from '../ble/debugLog';
 import { Button, Card, colors } from '../components/ui';
+import type { UploadPayload } from '../model';
 import { useAppState } from '../state/AppProvider';
 
 function totalSteps(payload: { steps: { steps: number }[] } | null): number {
@@ -9,10 +12,18 @@ function totalSteps(payload: { steps: { steps: number }[] } | null): number {
   return payload.steps.reduce((sum, sample) => sum + sample.steps, 0);
 }
 
+function latestSample(payload: UploadPayload | null): string | null {
+  const sample = payload?.heartRate.at(-1);
+  if (!sample) return null;
+  return `${sample.bpm} bpm at ${new Date(sample.timestamp).toLocaleString()}`;
+}
+
 export default function HomeScreen() {
-  const { busy, status, settings, queue, lastPayload, sync, measure, sendPending } = useAppState();
+  const { busy, status, settings, queue, lastPayload, sync, measure, sendPending, forgetRing } = useAppState();
+  const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
   const ringLabel = settings.ringName || settings.ringId || 'No ring selected';
   const apiLabel = settings.apiUrl.trim() || 'No API URL yet';
+  const newestHeartRate = latestSample(lastPayload);
 
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
@@ -30,12 +41,20 @@ export default function HomeScreen() {
       <Card>
         <Text style={styles.label}>Ring</Text>
         <Text style={styles.body}>{ringLabel}</Text>
+        {settings.ringId ? (
+          <Text selectable style={styles.meta}>
+            {settings.ringId}
+          </Text>
+        ) : null}
         <Text style={styles.meta}>
           {lastPayload?.battery
             ? `Battery ${lastPayload.battery.level}%${lastPayload.battery.charging ? ', charging' : ''}`
             : 'Battery shows up after a sync.'}
         </Text>
         <Button label="Choose ring" onPress={() => router.push('/scan')} tone="secondary" />
+        {settings.ringId ? (
+          <Button label="Disconnect ring" onPress={() => void forgetRing()} tone="danger" />
+        ) : null}
       </Card>
 
       <Card>
@@ -56,6 +75,12 @@ export default function HomeScreen() {
           <Metric label="HR samples" value={`${lastPayload?.heartRate.length ?? 0}`} />
           <Metric label="Steps" value={`${totalSteps(lastPayload)}`} />
         </View>
+        {newestHeartRate ? <Text style={styles.meta}>Newest stored heart rate {newestHeartRate}</Text> : null}
+        {lastPayload?.warnings.map((warning) => (
+          <Text key={warning} style={styles.warning}>
+            {warning}
+          </Text>
+        ))}
         <Text style={styles.meta}>
           {lastPayload ? `Synced ${new Date(lastPayload.syncedAt).toLocaleString()}` : 'No sync yet.'}
         </Text>
@@ -86,6 +111,19 @@ export default function HomeScreen() {
         tone="secondary"
       />
       <Button disabled={busy || queue.length === 0} label="Send waiting readings" onPress={() => void sendPending()} tone="secondary" />
+
+      <Card>
+        <Text style={styles.label}>Debug</Text>
+        {debugLines.length === 0 ? (
+          <Text style={styles.meta}>Scan or sync to fill this log. It clears when the app closes.</Text>
+        ) : (
+          debugLines.slice(0, 12).map((line, index) => (
+            <Text key={`${index}-${line}`} selectable style={styles.debug}>
+              {line}
+            </Text>
+          ))
+        )}
+      </Card>
     </ScrollView>
   );
 }
@@ -137,6 +175,17 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 14,
     lineHeight: 20,
+  },
+  warning: {
+    color: colors.danger,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  debug: {
+    color: colors.muted,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+    lineHeight: 17,
   },
   metrics: {
     flexDirection: 'row',

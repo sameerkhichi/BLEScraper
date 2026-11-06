@@ -11,6 +11,7 @@ import {
   SportDetailParser,
   UART_SERVICE_UUID,
   advertisesColmiService,
+  isLikelyRing,
   parseBattery,
   parseRealtime,
   setTimePacket,
@@ -120,6 +121,16 @@ test('realtime packet distinguishes a reading from an error', () => {
     reading: 1,
     code: 2,
   });
+});
+
+test('QRing names such as COLMI_CA02 count as the ring', () => {
+  assert.equal(isLikelyRing('COLMI_CA02'), true);
+  assert.equal(isLikelyRing('COLMI_R09'), true);
+  assert.equal(isLikelyRing('CA02'), true);
+  assert.equal(isLikelyRing('R09'), true);
+  assert.equal(isLikelyRing('iPhone'), false);
+  assert.equal(isLikelyRing('Galaxy Buds'), false);
+  assert.equal(isLikelyRing('  '), false);
 });
 
 test('Colmi service matching ignores case and dashes', () => {

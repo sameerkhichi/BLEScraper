@@ -26,16 +26,29 @@ export function Button({
   label: string;
   onPress: () => void;
   disabled?: boolean;
-  tone?: 'primary' | 'secondary';
+  tone?: 'primary' | 'secondary' | 'danger';
 }) {
   return (
     <Pressable
       accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
-      style={[styles.button, tone === 'secondary' && styles.secondary, disabled && styles.disabled]}
+      style={[
+        styles.button,
+        tone === 'secondary' && styles.secondary,
+        tone === 'danger' && styles.danger,
+        disabled && styles.disabled,
+      ]}
     >
-      <Text style={[styles.buttonLabel, tone === 'secondary' && styles.secondaryLabel]}>{label}</Text>
+      <Text
+        style={[
+          styles.buttonLabel,
+          tone === 'secondary' && styles.secondaryLabel,
+          tone === 'danger' && styles.dangerLabel,
+        ]}
+      >
+        {label}
+      </Text>
     </Pressable>
   );
 }
@@ -61,6 +74,11 @@ const styles = StyleSheet.create({
     borderColor: colors.line,
     borderWidth: 1,
   },
+  danger: {
+    backgroundColor: colors.card,
+    borderColor: colors.danger,
+    borderWidth: 1,
+  },
   disabled: {
     opacity: 0.45,
   },
@@ -71,5 +89,8 @@ const styles = StyleSheet.create({
   },
   secondaryLabel: {
     color: colors.text,
+  },
+  dangerLabel: {
+    color: colors.danger,
   },
 });

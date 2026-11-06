@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 
+import { debugLog } from '../ble/debugLog';
+import { getBleManager } from '../ble/manager';
 import type { AppSettings, UploadPayload } from '../model';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
 import {
@@ -22,6 +24,7 @@ type AppContextValue = {
   lastPayload: UploadPayload | null;
   saveAppSettings: (settings: AppSettings) => Promise<void>;
   selectRing: (ringId: string, ringName: string | null) => Promise<void>;
+  forgetRing: () => Promise<void>;
   sync: () => Promise<void>;
   measure: () => Promise<void>;
   sendPending: () => Promise<void>;
@@ -115,15 +118,39 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [queue, sendQueue],
   );
 
+  const releaseRing = useCallback(async (ringId: string | null) => {
+    if (!ringId) return;
+    try {
+      await getBleManager().cancelDeviceConnection(ringId);
+      debugLog(`Cancelled connection ${ringId}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'not connected';
+      debugLog(`No open connection for ${ringId}: ${message}`);
+    }
+  }, []);
+
   const selectRing = useCallback(
     async (ringId: string, ringName: string | null) => {
+      const previous = settings.ringId;
       const next = { ...settings, ringId, ringName };
       setSettings(next);
       await saveSettings(next);
+      if (previous && previous !== ringId) await releaseRing(previous);
       setStatus(`Saved ${ringName || 'ring'}.`);
+      debugLog(`Selected ${ringName || ringId}`);
     },
-    [settings],
+    [releaseRing, settings],
   );
+
+  const forgetRing = useCallback(async () => {
+    const ringId = settings.ringId;
+    const next = { ...settings, ringId: null, ringName: null };
+    setSettings(next);
+    await saveSettings(next);
+    await releaseRing(ringId);
+    setStatus('Disconnected.');
+    debugLog('Forgot the selected ring');
+  }, [releaseRing, settings]);
 
   const sync = useCallback(async () => {
     if (!settings.ringId) {
@@ -138,7 +165,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await publishQueue(nextQueue);
       await sendQueue(nextQueue, settings);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Sync failed.');
+      const message = error instanceof Error ? error.message : 'Sync failed.';
+      debugLog(message);
+      setStatus(message);
     } finally {
       setBusy(false);
     }
@@ -161,7 +190,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
       await publishQueue(nextQueue);
       await sendQueue(nextQueue, settings);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Measurement failed.');
+      const message = error instanceof Error ? error.message : 'Measurement failed.';
+      debugLog(message);
+      setStatus(message);
     } finally {
       setBusy(false);
     }
@@ -172,7 +203,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     try {
       await sendQueue(queue, settings);
     } catch (error) {
-      setStatus(error instanceof Error ? error.message : 'Upload failed.');
+      const message = error instanceof Error ? error.message : 'Upload failed.';
+      debugLog(message);
+      setStatus(message);
     } finally {
       setBusy(false);
     }
@@ -188,6 +221,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lastPayload,
       saveAppSettings,
       selectRing,
+      forgetRing,
       sync,
       measure,
       sendPending,
@@ -201,6 +235,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       lastPayload,
       saveAppSettings,
       selectRing,
+      forgetRing,
       sync,
       measure,
       sendPending,

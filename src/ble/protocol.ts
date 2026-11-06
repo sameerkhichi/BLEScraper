@@ -233,7 +233,15 @@ export class SportDetailParser {
 
 export function isLikelyRing(name: string | null | undefined): boolean {
   if (!name) return false;
-  return /colmi|qring|r0\d|smart\s*ring/i.test(name);
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  return /colmi|qring|smart\s*ring|(?:^|[_\s-])(?:r0\d|ca\d{2})(?:$|[_\s-])/i.test(trimmed);
+}
+
+export function ringMatch(name: string | null, serviceUuids: string[] | null | undefined): string | null {
+  if (isLikelyRing(name)) return `Name ${name}`;
+  if (advertisesColmiService(serviceUuids)) return 'Advertises the Colmi service';
+  return null;
 }
 
 function normalizeUuid(value: string): string {
