@@ -10,6 +10,7 @@ import {
   CMD_BATTERY,
   CMD_RAW_SENSOR,
   CMD_READ_HEART_RATE,
+  CMD_REAL_TIME_HEART_RATE,
   CMD_SET_TIME,
   CMD_START_REAL_TIME,
   CMD_STEPS,
@@ -25,12 +26,13 @@ import {
   UART_TX_UUID,
   batteryPacket,
   bodyTemperatureCelsius,
-  isPlausibleHeartRate,
   isPlausibleSpo2,
   parseBattery,
+  parseLiveHeartRate,
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
+  realtimeHeartRatePacket,
   readHeartRatePacket,
   readStepsPacket,
   setTimePacket,
@@ -40,6 +42,36 @@ import {
 
 const HISTORY_TIMEOUT_MS = 15000;
 const SHORT_TIMEOUT_MS = 5000;
+const HEART_RATE_TIMEOUT_MS = 35000;
+
+type BleFailure = {
+  message?: string;
+  reason?: string | null;
+  errorCode?: number | null;
+  iosErrorCode?: number | null;
+  androidErrorCode?: number | null;
+  attErrorCode?: number | null;
+};
+
+function describeBleError(error: BleFailure): string {
+  const reason = error.reason?.trim();
+  const generic = !error.message || error.message.startsWith('Unknown error occurred');
+  const detail = reason || (generic ? null : error.message);
+  const codes = [
+    error.iosErrorCode != null ? `iOS ${error.iosErrorCode}` : null,
+    error.androidErrorCode != null ? `Android ${error.androidErrorCode}` : null,
+    error.attErrorCode != null ? `ATT ${error.attErrorCode}` : null,
+    error.errorCode != null ? `code ${error.errorCode}` : null,
+  ].filter((part): part is string => Boolean(part));
+  if (detail && codes.length > 0) return `${detail} (${codes.join(', ')})`;
+  if (detail) return detail;
+  if (codes.length > 0) return codes.join(', ');
+  return 'Unknown Bluetooth error.';
+}
+
+function toHex(packet: Uint8Array): string {
+  return Array.from(packet.slice(0, 8), (byte) => byte.toString(16).padStart(2, '0')).join(' ');
+}
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
@@ -49,6 +81,7 @@ function delay(ms: number): Promise<void> {
 
 export class RingClient {
   private subscription: Subscription | null = null;
+  private notifying = false;
   private disconnectSubscription: Subscription | null = null;
   private listeners = new Map<number, (packet: Uint8Array) => void>();
   private aborts = new Set<(error: Error) => void>();
@@ -80,12 +113,15 @@ export class RingClient {
     debugLog(`Connected ${deviceId}. ${services}`);
 
     const client = new RingClient(device);
+    client.notifying = true;
     client.subscription = device.monitorCharacteristicForService(
       UART_SERVICE_UUID,
       UART_TX_UUID,
       (error, characteristic) => {
         if (error) {
-          debugLog(`Notify error on ${deviceId}: ${error.message}`);
+          if (!client.notifying) return;
+          debugLog(`Notify error on ${deviceId}: ${describeBleError(error)}`);
+          client.failAll(new Error(`The ring stopped sending data. ${describeBleError(error)}`));
           return;
         }
         if (!characteristic?.value) return;
@@ -102,6 +138,7 @@ export class RingClient {
 
   async disconnect(): Promise<void> {
     debugLog(`Disconnecting ${this.device.id}`);
+    this.notifying = false;
     this.subscription?.remove();
     this.disconnectSubscription?.remove();
     this.subscription = null;
@@ -153,7 +190,7 @@ export class RingClient {
   }
 
   async measureHeartRate(): Promise<number | null> {
-    return this.run(() => this.collectRealtime(REALTIME_HEART_RATE, isPlausibleHeartRate, 20000));
+    return this.run(() => this.collectHeartRate(HEART_RATE_TIMEOUT_MS));
   }
 
   async measureBloodOxygen(): Promise<number | null> {
@@ -212,6 +249,76 @@ export class RingClient {
 
   stopMotion(): void {
     this.motionStop?.();
+  }
+
+  private async collectHeartRate(timeoutMs: number): Promise<number | null> {
+    const readings: number[] = [];
+    let lastPacket: Uint8Array | null = null;
+    let poll: ReturnType<typeof setInterval> | null = null;
+    const commands = [CMD_START_REAL_TIME, CMD_REAL_TIME_HEART_RATE];
+
+    const stopPolling = () => {
+      if (!poll) return;
+      clearInterval(poll);
+      poll = null;
+    };
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => complete(), timeoutMs);
+        const finish = (rejectWith?: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          stopPolling();
+          commands.forEach((command) => this.listeners.delete(command));
+          this.aborts.delete(abort);
+          if (rejectWith) reject(rejectWith);
+          else resolve();
+        };
+        const complete = () => finish();
+        const abort = (error: Error) => finish(error);
+        const take = (packet: Uint8Array) => {
+          lastPacket = packet;
+          const bpm = parseLiveHeartRate(packet);
+          if (bpm === null) return;
+          readings.push(bpm);
+          if (readings.length >= 1) complete();
+        };
+
+        this.aborts.add(abort);
+        commands.forEach((command) => this.listeners.set(command, take));
+        poll = setInterval(() => {
+          if (readings.length > 0) return;
+          this.send(realtimeHeartRatePacket()).catch(() => undefined);
+        }, 3000);
+        this.send(startRealtimePacket(REALTIME_HEART_RATE))
+          .then(async () => {
+            await delay(400);
+            if (settled) return;
+            await this.send(realtimeHeartRatePacket());
+          })
+          .catch(abort);
+      });
+    } finally {
+      stopPolling();
+      commands.forEach((command) => this.listeners.delete(command));
+      try {
+        await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
+      } catch {
+        // A reading is still usable when the stop command fails.
+      }
+    }
+
+    if (readings.length === 0) {
+      debugLog(
+        lastPacket
+          ? `Heart-rate packet ${toHex(lastPacket)} was not a reading.`
+          : 'No heart-rate packet arrived.',
+      );
+    }
+    return readings.length === 0 ? null : readings[readings.length - 1];
   }
 
   private async collectRealtime(

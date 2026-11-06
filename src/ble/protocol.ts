@@ -9,6 +9,7 @@ export const CMD_SET_TIME = 1;
 export const CMD_BATTERY = 3;
 export const CMD_READ_HEART_RATE = 21;
 export const CMD_STEPS = 67;
+export const CMD_REAL_TIME_HEART_RATE = 30;
 export const CMD_START_REAL_TIME = 105;
 export const CMD_STOP_REAL_TIME = 106;
 export const CMD_RAW_SENSOR = 0xa1;
@@ -16,6 +17,7 @@ export const RAW_SENSOR_ENABLE = 0x04;
 export const RAW_SENSOR_DISABLE = 0x02;
 export const REALTIME_HEART_RATE = 1;
 export const REALTIME_SPO2 = 3;
+export const REALTIME_HEART_RATE_STREAM = 6;
 export const REALTIME_TEMPERATURE = 0x0b;
 
 const ACTION_START = 1;
@@ -69,6 +71,11 @@ export function stopRealtimePacket(readingType: number): Uint8Array {
   return makePacket(CMD_STOP_REAL_TIME, [readingType, 0, 0]);
 }
 
+// QRing polls live heart rate with command 30, type 3. The BPM comes back in byte 1.
+export function realtimeHeartRatePacket(): Uint8Array {
+  return makePacket(CMD_REAL_TIME_HEART_RATE, [3]);
+}
+
 export function parseRealtime(packet: Uint8Array):
   | { kind: 'reading'; reading: number; value: number }
   | { kind: 'error'; reading: number; code: number } {
@@ -76,6 +83,25 @@ export function parseRealtime(packet: Uint8Array):
     return { kind: 'error', reading: packet[1], code: packet[2] };
   }
   return { kind: 'reading', reading: packet[1], value: packet[3] };
+}
+
+// Command 105 heart-rate replies are not shaped like SpO2. A settled BPM may sit in byte 3
+// with a non-zero status in byte 2, or in byte 2 on its own. Command 30 carries the BPM in byte 1.
+export function parseLiveHeartRate(packet: Uint8Array): number | null {
+  if (packet[0] === CMD_REAL_TIME_HEART_RATE) {
+    if (isPlausibleHeartRate(packet[1])) return packet[1];
+    if (isPlausibleHeartRate(packet[3])) return packet[3];
+    return null;
+  }
+
+  if (packet[0] !== CMD_START_REAL_TIME) return null;
+  if (packet[1] !== REALTIME_HEART_RATE && packet[1] !== REALTIME_HEART_RATE_STREAM) return null;
+
+  const statusOrBpm = packet[2] ?? 0;
+  const value = packet[3] ?? 0;
+  if (isPlausibleHeartRate(value)) return value;
+  if (isPlausibleHeartRate(statusOrBpm)) return statusOrBpm;
+  return null;
 }
 
 export function isPlausibleHeartRate(value: number): boolean {

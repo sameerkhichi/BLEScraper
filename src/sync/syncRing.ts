@@ -102,9 +102,15 @@ export async function scanRing(
 
     if (wantHeart) {
       report(onStatus, 'Measuring heart rate');
-      realtimeHeartRate = await client.measureHeartRate();
-      if (realtimeHeartRate === null) warnings.push('The ring did not return a heart-rate reading.');
-      else debugLog(`Live heart rate ${realtimeHeartRate}`);
+      try {
+        realtimeHeartRate = await client.measureHeartRate();
+        if (realtimeHeartRate === null) warnings.push('The ring did not return a heart-rate reading.');
+        else debugLog(`Live heart rate ${realtimeHeartRate}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'The ring did not return a heart-rate reading.';
+        warnings.push(message);
+        debugLog(message);
+      }
     }
 
     if (wantOxygen) {
