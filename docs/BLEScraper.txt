@@ -1,0 +1,21 @@
+This BLEScraper is used to send data to Solloid through my smart ring.
+
+Ring: Colmi R09
+
+-----------------------------------------------------------------------------------------
+
+Todo:
+
+
+
+------------------------------------------------------------------------------------------
+
+Notes
+
+- App will be build using react native and typescript so I can use expo
+- The Bluetooth protocal will be handled through a known react native package to scan for BLE connections. Then a reverse engineered COLMI protocol to decode the raw data coming from the ring. 
+- The app will hold pending uploads of data until connections is re-established.
+- Will allow for HTTP/JSON communication with an API.
+- EAS Build will upload the ipa build to app store connect
+- App store connect will automatically add the app to testflight and will install on my phone
+- Testflight expires every 90 days. Will add a GitHub action to refresh the build every 60 days or on push to update code.
