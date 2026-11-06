@@ -18,6 +18,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" options={{ title: 'BLEScraper' }} />
         <Stack.Screen name="scan" options={{ title: 'Choose ring' }} />
         <Stack.Screen name="motion" options={{ title: 'Accelerometer' }} />
+        <Stack.Screen name="sleep" options={{ title: 'Sleep' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
       </Stack>
     </AppProvider>

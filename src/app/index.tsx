@@ -22,6 +22,16 @@ function formatReading(value: number | null | undefined, suffix = ''): string {
   return typeof value === 'number' ? `${value}${suffix}` : '—';
 }
 
+function formatAsleep(payload: UploadPayload | null): string {
+  const night = payload?.sleep[0];
+  if (!night) return '—';
+  const hours = Math.floor(night.minutesAsleep / 60);
+  const rest = night.minutesAsleep % 60;
+  if (hours === 0) return `${rest}m`;
+  if (rest === 0) return `${hours}h`;
+  return `${hours}h ${rest}m`;
+}
+
 export default function HomeScreen() {
   const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing } = useAppState();
   const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
@@ -89,6 +99,7 @@ export default function HomeScreen() {
           <Metric label="Temp" value={typeof lastPayload?.bodyTemperatureC === 'number' ? `${lastPayload.bodyTemperatureC.toFixed(1)}°` : '—'} />
           <Metric label="HR samples" value={`${lastPayload?.heartRate.length ?? 0}`} />
           <Metric label="Steps" value={`${totalSteps(lastPayload)}`} />
+          <Metric label="Asleep" value={formatAsleep(lastPayload)} />
         </View>
         {motion ? (
           <Text style={styles.meta}>
@@ -96,6 +107,12 @@ export default function HomeScreen() {
           </Text>
         ) : null}
         {newestHeartRate ? <Text style={styles.meta}>Newest stored heart rate {newestHeartRate}</Text> : null}
+        {lastPayload && lastPayload.sleep.length > 0 ? (
+          <Text style={styles.meta}>
+            Latest sleep {formatAsleep(lastPayload)}, {lastPayload.sleep[0].cycles.length} cycle
+            {lastPayload.sleep[0].cycles.length === 1 ? '' : 's'}
+          </Text>
+        ) : null}
         {lastPayload?.warnings.map((warning) => (
           <Text key={warning} style={styles.warning}>
             {warning}
@@ -125,6 +142,7 @@ export default function HomeScreen() {
       <Button disabled={busy} label="Measure body temperature" onPress={() => requireRing(() => void scan('temperature'))} tone="secondary" />
       <Button disabled={busy} label="Scan all sensors" onPress={() => requireRing(() => void scan('all'))} />
       <Button disabled={busy} label="Accelerometer" onPress={() => requireRing(() => router.push('/motion'))} tone="secondary" />
+      <Button label="Sleep" onPress={() => router.push('/sleep')} tone="secondary" />
       <Button disabled={busy || queue.length === 0} label="Send waiting readings" onPress={() => void sendPending()} tone="secondary" />
 
       <Card>

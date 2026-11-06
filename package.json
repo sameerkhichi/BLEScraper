@@ -27,7 +27,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/ble/protocol.test.ts src/ble/scanList.test.ts src/sync/queue.test.ts"
+    "test": "tsx --test src/ble/protocol.test.ts src/ble/sleep.test.ts src/ble/scanList.test.ts src/sync/queue.test.ts"
   },
   "private": true,
   "overrides": {

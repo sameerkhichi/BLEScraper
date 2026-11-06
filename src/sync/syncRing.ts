@@ -39,7 +39,18 @@ export async function syncRing(
 
   report(onStatus, 'Reading steps');
   const steps = [...(await client.getSteps(1)), ...(await client.getSteps(0))];
-  debugLog(`Heart-rate samples ${heartRate.length}, step samples ${steps.length}`);
+
+  report(onStatus, 'Reading sleep');
+  let sleep: UploadPayload['sleep'] = [];
+  try {
+    sleep = await client.getSleep(today);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'The ring did not return sleep.';
+    warnings.push(message);
+    debugLog(message);
+  }
+
+  debugLog(`Heart-rate samples ${heartRate.length}, step samples ${steps.length}, sleep nights ${sleep.length}`);
   if (warnings.length > 0) debugLog(warnings.join(' '));
 
   return {
@@ -53,6 +64,7 @@ export async function syncRing(
     accelerometer: null,
     heartRate,
     steps,
+    sleep,
     warnings,
   };
 }
@@ -72,6 +84,7 @@ export function readingPayload(
     accelerometer: null,
     heartRate: [],
     steps: [],
+    sleep: [],
     warnings: [],
     ...patch,
     ring: { id: ringId, name: ringName },

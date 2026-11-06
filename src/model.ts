@@ -34,6 +34,38 @@ export type AccelSample = AccelReading & {
 
 export type ScanKind = 'heart-rate' | 'spo2' | 'temperature' | 'all';
 
+export type SleepStageName = 'light' | 'deep' | 'rem' | 'awake' | 'unknown';
+
+export type SleepStage = {
+  stage: SleepStageName;
+  minutes: number;
+  startedAt: string;
+};
+
+export type SleepCycle = {
+  index: number;
+  startedAt: string;
+  endedAt: string;
+  minutes: number;
+  complete: boolean;
+};
+
+export type SleepNight = {
+  daysAgo: number;
+  startedAt: string;
+  endedAt: string;
+  minutesAsleep: number;
+  minutesInBed: number;
+  minutesLight: number;
+  minutesDeep: number;
+  minutesRem: number;
+  minutesAwake: number;
+  minutesUnknown: number;
+  awakenings: number;
+  stages: SleepStage[];
+  cycles: SleepCycle[];
+};
+
 export type UploadPayload = {
   source: 'colmi-r09';
   syncedAt: string;
@@ -48,6 +80,7 @@ export type UploadPayload = {
   accelerometer: AccelSample | null;
   heartRate: HeartRateSample[];
   steps: StepSample[];
+  sleep: SleepNight[];
   warnings: string[];
 };
 
@@ -59,6 +92,19 @@ export function isAccelSample(value: unknown): value is AccelSample {
     typeof sample.y === 'number' &&
     typeof sample.z === 'number' &&
     typeof sample.sampledAt === 'string'
+  );
+}
+
+export function isSleepNight(value: unknown): value is SleepNight {
+  if (!value || typeof value !== 'object') return false;
+  const night = value as SleepNight;
+  return (
+    typeof night.daysAgo === 'number' &&
+    typeof night.startedAt === 'string' &&
+    typeof night.endedAt === 'string' &&
+    typeof night.minutesAsleep === 'number' &&
+    Array.isArray(night.stages) &&
+    Array.isArray(night.cycles)
   );
 }
 
@@ -77,6 +123,7 @@ export function mergeReadings(
     accelerometer: next.accelerometer ?? previous.accelerometer,
     heartRate: keepHistory ? previous.heartRate : next.heartRate,
     steps: keepHistory ? previous.steps : next.steps,
+    sleep: keepHistory ? previous.sleep : next.sleep,
   };
 }
 

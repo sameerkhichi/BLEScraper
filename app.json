@@ -11,8 +11,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.sameer.blescraper",
       "infoPlist": {
-        "NSBluetoothAlwaysUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, and battery.",
-        "NSBluetoothPeripheralUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, and battery.",
+        "NSBluetoothAlwaysUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery.",
+        "NSBluetoothPeripheralUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery.",
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -46,7 +46,7 @@
           "modes": [
             "central"
           ],
-          "bluetoothAlwaysPermission": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, and battery."
+          "bluetoothAlwaysPermission": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery."
         }
       ]
     ],

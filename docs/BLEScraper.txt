@@ -21,3 +21,62 @@ Notes
 - App store connect will automatically add the app to testflight and will install on my phone
 - Testflight expires every 90 days. Will add a GitHub action to refresh the build every 60 days or on push to update code.
 -Expo is run through my main email on google sign on.
+
+Sleep upload
+
+Sync posts one JSON body to the API URL (HTTP or the port-forwarded Arduino IP). Content-Type is application/json. A live sensor reading uses the same shape and sends "sleep": [].
+
+Timestamps are UTC ISO-8601. The app sets the ring clock to UTC, and sleep start/end are minutes after that midnight. If start is later than end, sleep began the evening before the wake-up day.
+
+The ring sends stages, not a score and not cycle numbers. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM.
+
+{
+  "source": "colmi-r09",
+  "syncedAt": "2026-11-06T15:04:00.000Z",
+  "ring": { "id": "AA:BB:CC:DD:EE:FF", "name": "R09" },
+  "battery": { "level": 80, "charging": false },
+  "realtimeHeartRate": null,
+  "spo2": null,
+  "bodyTemperatureC": null,
+  "accelerometer": null,
+  "heartRate": [{ "timestamp": "2026-11-06T04:00:00.000Z", "bpm": 54 }],
+  "steps": [{ "timestamp": "2026-11-06T00:00:00.000Z", "steps": 0, "calories": 0, "distanceMeters": 0 }],
+  "warnings": [],
+  "sleep": [
+    {
+      "daysAgo": 0,
+      "startedAt": "2026-11-05T23:00:00.000Z",
+      "endedAt": "2026-11-06T01:30:00.000Z",
+      "minutesAsleep": 130,
+      "minutesInBed": 150,
+      "minutesLight": 40,
+      "minutesDeep": 50,
+      "minutesRem": 40,
+      "minutesAwake": 20,
+      "minutesUnknown": 0,
+      "awakenings": 1,
+      "stages": [
+        { "stage": "light", "minutes": 40, "startedAt": "2026-11-05T23:00:00.000Z" },
+        { "stage": "deep", "minutes": 50, "startedAt": "2026-11-05T23:40:00.000Z" },
+        { "stage": "rem", "minutes": 40, "startedAt": "2026-11-06T00:30:00.000Z" },
+        { "stage": "awake", "minutes": 20, "startedAt": "2026-11-06T01:10:00.000Z" }
+      ],
+      "cycles": [
+        {
+          "index": 1,
+          "startedAt": "2026-11-05T23:00:00.000Z",
+          "endedAt": "2026-11-06T01:10:00.000Z",
+          "minutes": 130,
+          "complete": true
+        },
+        {
+          "index": 2,
+          "startedAt": "2026-11-06T01:10:00.000Z",
+          "endedAt": "2026-11-06T01:30:00.000Z",
+          "minutes": 20,
+          "complete": false
+        }
+      ]
+    }
+  ]
+}

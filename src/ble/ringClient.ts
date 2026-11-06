@@ -1,6 +1,6 @@
 import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 
-import type { BatteryReading, HeartRateSample, StepSample } from '../model';
+import type { BatteryReading, HeartRateSample, SleepNight, StepSample } from '../model';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
 import { getBleManager } from './manager';
@@ -37,6 +37,14 @@ import {
   startRealtimePacket,
   stopRealtimePacket,
 } from './protocol';
+import {
+  BIG_DATA_RX_UUID,
+  BIG_DATA_SERVICE_UUID,
+  BIG_DATA_TX_UUID,
+  BigDataAssembler,
+  parseSleepPacket,
+  sleepRequestPacket,
+} from './sleep';
 
 const HISTORY_TIMEOUT_MS = 15000;
 const SHORT_TIMEOUT_MS = 5000;
@@ -79,6 +87,10 @@ function delay(ms: number): Promise<void> {
 
 export class RingClient {
   private subscription: Subscription | null = null;
+  private bigDataSubscription: Subscription | null = null;
+  private bigDataReady = false;
+  private bigDataWaiters = new Set<(chunk: Uint8Array) => void>();
+  private sleepAbort: ((error: Error) => void) | null = null;
   private notifying = false;
   private open = true;
   private disconnectSubscription: Subscription | null = null;
@@ -127,6 +139,27 @@ export class RingClient {
         client.handleNotification(characteristic.value);
       },
     );
+    try {
+      client.bigDataSubscription = device.monitorCharacteristicForService(
+        BIG_DATA_SERVICE_UUID,
+        BIG_DATA_TX_UUID,
+        (error, characteristic) => {
+          if (error) {
+            if (!client.notifying) return;
+            debugLog(`Sleep notify error on ${deviceId}: ${describeBleError(error)}`);
+            client.failBigData(new Error(`The ring did not send sleep data. ${describeBleError(error)}`));
+            return;
+          }
+          if (!characteristic?.value) return;
+          const chunk = base64ToBytes(characteristic.value);
+          client.bigDataWaiters.forEach((waiter) => waiter(chunk));
+        },
+      );
+      client.bigDataReady = true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'sleep notifications unavailable';
+      debugLog(`Sleep channel unavailable on ${deviceId}: ${message}`);
+    }
     client.disconnectSubscription = device.onDisconnected((error) => {
       client.open = false;
       forgetRingSession(client);
@@ -144,9 +177,12 @@ export class RingClient {
     forgetRingSession(this);
     this.failAll(new Error('The ring disconnected.'));
     this.subscription?.remove();
+    this.bigDataSubscription?.remove();
     this.disconnectSubscription?.remove();
     this.subscription = null;
+    this.bigDataSubscription = null;
     this.disconnectSubscription = null;
+    this.bigDataWaiters.clear();
     this.listeners.clear();
     try {
       await this.device.cancelConnection();
@@ -190,6 +226,15 @@ export class RingClient {
         HISTORY_TIMEOUT_MS,
       );
       return result.kind === 'none' ? [] : result.samples;
+    });
+  }
+
+  async getSleep(now = new Date()): Promise<SleepNight[]> {
+    return this.run(async () => {
+      const packet = await this.readSleepPacket(HISTORY_TIMEOUT_MS);
+      const nights = parseSleepPacket(packet, now);
+      debugLog(`Sleep nights ${nights.length}`);
+      return nights;
     });
   }
 
@@ -373,6 +418,73 @@ export class RingClient {
       () => undefined,
     );
     return result;
+  }
+
+  private async readSleepPacket(timeoutMs: number): Promise<Uint8Array> {
+    if (!this.bigDataReady) {
+      throw new Error('This ring did not expose sleep data.');
+    }
+
+    const assembler = new BigDataAssembler();
+    let abort = (_error: Error) => undefined;
+
+    const pending = new Promise<Uint8Array>((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.bigDataWaiters.delete(waiter);
+        this.aborts.delete(abort);
+        if (this.sleepAbort === abort) this.sleepAbort = null;
+      };
+      const timer = setTimeout(() => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        debugLog(`Sleep request on ${this.device.id} timed out after ${timeoutMs}ms`);
+        reject(new Error('The ring did not answer in time.'));
+      }, timeoutMs);
+      abort = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const waiter = (chunk: Uint8Array) => {
+        if (settled) return;
+        try {
+          const packet = assembler.push(chunk);
+          if (!packet) return;
+          settled = true;
+          cleanup();
+          resolve(packet);
+        } catch (error) {
+          abort(error instanceof Error ? error : new Error('Could not read the sleep packet.'));
+        }
+      };
+      this.aborts.add(abort);
+      this.bigDataWaiters.add(waiter);
+      this.sleepAbort = abort;
+    });
+    pending.catch(() => undefined);
+
+    try {
+      await this.sendBigData(sleepRequestPacket());
+    } catch (error) {
+      abort(error instanceof Error ? error : new Error('Could not request sleep data.'));
+    }
+    return pending;
+  }
+
+  private failBigData(error: Error): void {
+    this.sleepAbort?.(error);
+  }
+
+  private async sendBigData(packet: Uint8Array): Promise<void> {
+    await this.device.writeCharacteristicWithResponseForService(
+      BIG_DATA_SERVICE_UUID,
+      BIG_DATA_RX_UUID,
+      bytesToBase64(packet),
+    );
   }
 
   private async send(packet: Uint8Array): Promise<void> {

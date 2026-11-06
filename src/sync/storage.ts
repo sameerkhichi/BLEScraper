@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { defaultSettings, isAccelSample, type AppSettings, type UploadPayload } from '../model';
+import { defaultSettings, isAccelSample, isSleepNight, type AppSettings, type UploadPayload } from '../model';
 import type { PendingUpload } from './queue';
 
 const SETTINGS_KEY = 'blescraper.settings';
@@ -43,6 +43,7 @@ export async function loadLastPayload(): Promise<UploadPayload | null> {
     spo2: typeof parsed.spo2 === 'number' ? parsed.spo2 : null,
     bodyTemperatureC: typeof parsed.bodyTemperatureC === 'number' ? parsed.bodyTemperatureC : null,
     accelerometer: isAccelSample(parsed.accelerometer) ? parsed.accelerometer : null,
+    sleep: Array.isArray(parsed.sleep) ? parsed.sleep.filter(isSleepNight) : [],
   };
 }
 

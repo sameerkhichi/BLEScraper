@@ -16,6 +16,7 @@ function sample(bpm: number): UploadPayload {
     accelerometer: null,
     heartRate: [],
     steps: [],
+    sleep: [],
     warnings: [],
   };
 }
@@ -48,4 +49,30 @@ test('a blood-oxygen reading keeps the last heart rate', () => {
   assert.equal(merged.realtimeHeartRate, 72);
   assert.equal(merged.spo2, 98);
   assert.equal(merged.syncedAt, '2026-11-06T00:01:00.000Z');
+});
+
+test('a live reading keeps the last sleep night and a sync replaces it', () => {
+  const previous = sample(72);
+  previous.sleep = [
+    {
+      daysAgo: 0,
+      startedAt: '2026-11-05T23:00:00.000Z',
+      endedAt: '2026-11-06T07:00:00.000Z',
+      minutesAsleep: 400,
+      minutesInBed: 480,
+      minutesLight: 200,
+      minutesDeep: 100,
+      minutesRem: 100,
+      minutesAwake: 20,
+      minutesUnknown: 0,
+      awakenings: 1,
+      stages: [],
+      cycles: [],
+    },
+  ];
+  const next = sample(0);
+  next.realtimeHeartRate = null;
+
+  assert.equal(mergeReadings(previous, next, true).sleep[0].minutesAsleep, 400);
+  assert.equal(mergeReadings(previous, next, false).sleep.length, 0);
 });
