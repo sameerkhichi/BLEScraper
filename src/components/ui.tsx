@@ -1,0 +1,75 @@
+import type { ReactNode } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+
+export const colors = {
+  bg: '#101410',
+  card: '#1a221c',
+  line: '#2d3a31',
+  text: '#f3f6f1',
+  muted: '#9aa89a',
+  accent: '#d6f25c',
+  accentText: '#17200a',
+  danger: '#ff8b78',
+  ok: '#9be7b0',
+};
+
+export function Card({ children }: { children: ReactNode }) {
+  return <View style={styles.card}>{children}</View>;
+}
+
+export function Button({
+  label,
+  onPress,
+  disabled = false,
+  tone = 'primary',
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  tone?: 'primary' | 'secondary';
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.button, tone === 'secondary' && styles.secondary, disabled && styles.disabled]}
+    >
+      <Text style={[styles.buttonLabel, tone === 'secondary' && styles.secondaryLabel]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.card,
+    borderColor: colors.line,
+    borderRadius: 16,
+    borderWidth: 1,
+    gap: 6,
+    padding: 16,
+  },
+  button: {
+    alignItems: 'center',
+    backgroundColor: colors.accent,
+    borderRadius: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  secondary: {
+    backgroundColor: colors.card,
+    borderColor: colors.line,
+    borderWidth: 1,
+  },
+  disabled: {
+    opacity: 0.45,
+  },
+  buttonLabel: {
+    color: colors.accentText,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  secondaryLabel: {
+    color: colors.text,
+  },
+});

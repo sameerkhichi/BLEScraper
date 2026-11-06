@@ -1,0 +1,30 @@
+# BLEScraper dependency inventory.
+# This is a React Native app. Install with npm, not pip:
+#
+#   npm ci
+#
+# package.json declares these packages. package-lock.json pins the full tree.
+# Keep this file in sync when a direct dependency is added or removed.
+
+# App
+@react-native-async-storage/async-storage@2.2.0
+@sfourdrinier/react-native-ble-plx@^3.9.3
+expo@~58.0.23
+expo-constants@~58.0.15
+expo-dev-client@~58.0.18
+expo-linking@~58.0.16
+expo-router@~58.0.30
+expo-status-bar@~58.0.4
+react@19.3.0
+# package.json overrides also pin react-dom to 19.3.0 so npm can install cleanly.
+react-native@0.88.1
+react-native-safe-area-context@~5.11.1
+react-native-screens@~4.30.1
+
+# Development
+@types/react@~19.3.0
+tsx@^4.23.15
+typescript@~6.0.3
+
+# CI only, installed by .github/workflows/testflight.yml rather than npm ci
+eas-cli@latest

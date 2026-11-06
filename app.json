@@ -1,0 +1,47 @@
+{
+  "expo": {
+    "name": "BLEScraper",
+    "slug": "blescraper",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "blescraper",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.sameer.blescraper",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, steps, and battery.",
+        "NSBluetoothPeripheralUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, steps, and battery.",
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": true
+        }
+      }
+    },
+    "android": {
+      "package": "com.sameer.blescraper",
+      "adaptiveIcon": {
+        "backgroundColor": "#101410",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "@sfourdrinier/react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "modes": ["central"],
+          "bluetoothAlwaysPermission": "BLEScraper connects to your Colmi R09 ring to read heart rate, steps, and battery."
+        }
+      ]
+    ]
+  }
+}

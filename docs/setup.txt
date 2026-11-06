@@ -1,0 +1,106 @@
+BLEScraper setup
+=================
+
+This app runs on an iPhone. It reads the Colmi R09 over unencrypted BLE GATT, keeps the reading on the phone if the network is down, and POSTs JSON to an HTTP API. That API is the Arduino Uno Q, reached through your home network and port forwarding.
+
+The iOS binary is built in the cloud with EAS, uploaded to App Store Connect, and attached to the TestFlight group named Internal. GitHub Actions does that on every push to main that changes code, and again on the 1st of every other month so the TestFlight build is refreshed before the 90-day expiry. GitHub's scheduler has no "every 60 days" interval, so every other month is the schedule.
+
+What you still need to fill in
+------------------------------
+
+1. Expo account. Create a token at https://expo.dev/accounts/[your-account]/settings/access-tokens
+   GitHub secret name: EXPO_TOKEN
+
+2. Apple Team ID, from https://developer.apple.com/account (Membership details).
+   GitHub secret name: APPLE_TEAM_ID
+
+3. An App Store Connect app whose bundle id is com.sameer.blescraper.
+   The Apple ID number is on the app's App Information page (a numeric id, not the bundle id).
+   GitHub secret name: ASC_APP_ID
+   Change the bundle id in app.json before the first App Store Connect app exists if you want a different one.
+
+4. A TestFlight internal group named exactly Internal, with your Apple ID as a tester.
+   Turn on automatic distribution for that group. Internal testers do not need Beta App Review.
+
+5. An App Store Connect API key (.p8, key id, issuer id) with App Manager access.
+   Store it with EAS once, from this repo, after `npx eas-cli login`:
+
+   npx eas-cli credentials --platform ios
+
+   Choose the production profile, then App Store Connect API key. The GitHub Action uses the key stored on Expo's servers. Do not commit the .p8 file.
+
+6. The Arduino URL, entered in the app under API settings. Example: http://203.0.113.10:8080/ingest
+   The phone allows plain HTTP because the home server is not required to have a certificate.
+   Optional API key is sent as the X-Api-Key header.
+
+Install
+-------
+
+Node 22.14 or newer.
+
+    npm ci
+
+Dependencies are declared in package.json and locked in package-lock.json. requirements.txt in the repo root is the same direct dependency list.
+
+Day-to-day JS check, from Windows:
+
+    npm test
+    npm run typecheck
+    npx expo start
+
+Bluetooth is a native module, so Expo Go cannot talk to the ring. A development or TestFlight build is required on the phone. This PC cannot compile the iOS app locally. EAS builds it.
+
+First cloud build
+-----------------
+
+    npx eas-cli login
+    npx eas-cli init
+    npx eas-cli build --platform ios --profile production
+
+`eas init` writes the Expo project id into app.json. Commit that change. The first build asks Apple credential questions and saves them for the GitHub Action. After it finishes:
+
+    npx eas-cli submit --platform ios --profile production --latest
+
+Confirm the build shows up in TestFlight and installs on the phone. Later pushes to main do this from GitHub Actions.
+
+GitHub Action
+-------------
+
+Workflow: .github/workflows/testflight.yml
+
+Repository secrets:
+
+    EXPO_TOKEN
+    ASC_APP_ID
+    APPLE_TEAM_ID
+
+The job runs `eas build --platform ios --profile production --auto-submit`. EAS builds the IPA, then submits it to TestFlight when the build finishes. The action does not wait for the compile, so GitHub minutes stay short. You can also run it by hand from the Actions tab.
+
+Scheduled runs only happen from the default branch, which is main.
+
+What the phone sends
+--------------------
+
+POST the saved API URL with Content-Type application/json.
+
+    {
+      "source": "colmi-r09",
+      "syncedAt": "2026-11-06T19:45:00.000Z",
+      "ring": { "id": "ios-peripheral-uuid", "name": "R09" },
+      "battery": { "level": 64, "charging": false },
+      "realtimeHeartRate": null,
+      "heartRate": [{ "timestamp": "2026-11-06T19:40:00.000Z", "bpm": 72 }],
+      "steps": [{ "timestamp": "2026-11-06T19:30:00.000Z", "steps": 120, "calories": 8, "distanceMeters": 90 }],
+      "warnings": []
+    }
+
+Any HTTP status from 200 through 299 removes that reading from the phone queue. Anything else keeps it, in order, and the next sync or app launch tries again.
+
+The ring clock is set to UTC on each sync. Heart-rate history is 5-minute samples. Step history is 15-minute blocks. A sync reads yesterday and today. "Measure heart rate" takes a live reading and sends that on its own.
+
+The GATT service is 6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E. Writes go to 6E400002 and notifications come from 6E400003. Packets are 16 bytes. No pairing step.
+
+Not in this first slice
+-----------------------
+
+Background sync while the app is closed. iOS limits that, and the current build only syncs while the app is open. The upload queue is the piece that survives a dropped network.

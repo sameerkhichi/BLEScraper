@@ -1,0 +1,57 @@
+name: TestFlight
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "**/*.md"
+  schedule:
+    # TestFlight builds expire after 90 days. GitHub cron cannot express
+    # "every 60 days", so this runs at 15:00 UTC on the 1st of every other month.
+    - cron: "0 15 1 */2 *"
+  workflow_dispatch:
+
+concurrency:
+  group: testflight-ios
+  cancel-in-progress: false
+
+jobs:
+  build-and-submit:
+    name: Build iOS and submit to TestFlight
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Expo and EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Require App Store Connect settings
+        env:
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$ASC_APP_ID" ] || [ -z "$APPLE_TEAM_ID" ]; then
+            echo "Add ASC_APP_ID and APPLE_TEAM_ID repository secrets before this job can submit to TestFlight."
+            exit 1
+          fi
+
+      - name: Build and submit to TestFlight
+        env:
+          ASC_APP_ID: ${{ secrets.ASC_APP_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: eas build --platform ios --profile production --non-interactive --auto-submit --no-wait

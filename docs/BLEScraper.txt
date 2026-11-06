@@ -6,7 +6,8 @@ Ring: Colmi R09
 
 Todo:
 
-
+- Phone app scaffold is in the repo root (Expo SDK 58, TypeScript).
+- Setup and the one-time Apple/Expo steps are in docs/setup.txt.
 
 ------------------------------------------------------------------------------------------
 
