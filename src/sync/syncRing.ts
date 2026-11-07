@@ -158,11 +158,12 @@ export function readingPayload(
   ringName: string | null,
   patch: Partial<UploadPayload> = {},
 ): UploadPayload {
-  return {
+  const payload: UploadPayload = {
     source: 'colmi-r09',
     syncedAt: new Date().toISOString(),
     battery: null,
     realtimeHeartRate: null,
+    realtimeHeartRateAt: null,
     spo2: null,
     bodyTemperatureC: null,
     vitalSpots: [],
@@ -174,6 +175,10 @@ export function readingPayload(
     ...patch,
     ring: { id: ringId, name: ringName },
   };
+  if (typeof payload.realtimeHeartRate === 'number' && !payload.realtimeHeartRateAt) {
+    payload.realtimeHeartRateAt = payload.syncedAt;
+  }
+  return payload;
 }
 
 export async function scanRing(
@@ -253,9 +258,11 @@ export async function measureWornSpots(
 }
 
 export function applyWornSpots(payload: UploadPayload, spots: WornSpots): UploadPayload {
+  const measuredAt = new Date().toISOString();
   return {
     ...payload,
     realtimeHeartRate: spots.realtimeHeartRate ?? payload.realtimeHeartRate,
+    realtimeHeartRateAt: spots.realtimeHeartRate != null ? measuredAt : payload.realtimeHeartRateAt,
     spo2: spots.spo2 ?? payload.spo2,
     bodyTemperatureC: spots.bodyTemperatureC ?? payload.bodyTemperatureC,
     vitalSpots: spots.vitalSpots.length > 0 ? spots.vitalSpots : payload.vitalSpots,

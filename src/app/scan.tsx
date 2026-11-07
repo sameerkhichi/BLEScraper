@@ -1,14 +1,15 @@
 import { ScanMode, type Device } from '@sfourdrinier/react-native-ble-plx';
 import { router } from 'expo-router';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
-import { debugLog, getDebugLines, subscribeDebugLog } from '../ble/debugLog';
+import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
 import { UART_SERVICE_UUID } from '../ble/protocol';
 import { closeRing } from '../ble/ringClient';
 import { createScanTracker, heldSighting, type ListedDevice, type ScanSighting } from '../ble/scanList';
 import { BIG_DATA_SERVICE_UUID } from '../ble/sleep';
+import { DebugLog } from '../components/debugLogView';
 import { Button, colors } from '../components/ui';
 import { useAppState } from '../state/AppProvider';
 import { pauseAutoSync, runWithRing } from '../sync/ringGate';
@@ -55,7 +56,6 @@ export default function ScanScreen() {
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [debug, setDebug] = useState(true);
-  const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
 
   const savedId = useRef(settings.ringId);
   const savedName = useRef(settings.ringName);
@@ -325,15 +325,7 @@ export default function ScanScreen() {
       {debug ? (
         <>
           <Text style={styles.section}>Debug log</Text>
-          {debugLines.length === 0 ? (
-            <Text style={styles.meta}>Waiting for the first advertisement.</Text>
-          ) : (
-            debugLines.slice(0, 12).map((line, index) => (
-              <Text key={`${index}-${line}`} selectable style={styles.debug}>
-                {line}
-              </Text>
-            ))
-          )}
+          <DebugLog empty="Waiting for the first advertisement. Earlier lines stay on this phone." />
         </>
       ) : null}
     </ScrollView>

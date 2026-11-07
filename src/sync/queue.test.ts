@@ -41,6 +41,7 @@ test('flush sends queued payloads in order and stops on the first failure', asyn
 test('a blood-oxygen reading keeps the last heart rate', () => {
   const previous = sample(72);
   previous.spo2 = 97;
+  previous.realtimeHeartRateAt = '2026-11-06T00:00:00.000Z';
   const next = sample(0);
   next.realtimeHeartRate = null;
   next.spo2 = 98;
@@ -48,8 +49,20 @@ test('a blood-oxygen reading keeps the last heart rate', () => {
 
   const merged = mergeReadings(previous, next, true);
   assert.equal(merged.realtimeHeartRate, 72);
+  assert.equal(merged.realtimeHeartRateAt, '2026-11-06T00:00:00.000Z');
   assert.equal(merged.spo2, 98);
   assert.equal(merged.syncedAt, '2026-11-06T00:01:00.000Z');
+});
+
+test('a new heart rate records when it was taken', () => {
+  const previous = sample(72);
+  previous.realtimeHeartRateAt = '2026-11-06T00:00:00.000Z';
+  const next = sample(80);
+  next.syncedAt = '2026-11-06T00:05:00.000Z';
+
+  const merged = mergeReadings(previous, next, true);
+  assert.equal(merged.realtimeHeartRate, 80);
+  assert.equal(merged.realtimeHeartRateAt, '2026-11-06T00:05:00.000Z');
 });
 
 test('a later download keeps older stored samples and updates the same minute', () => {

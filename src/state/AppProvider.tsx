@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { AppState } from 'react-native';
 
 import { closeRing } from '../ble/ringClient';
-import { debugLog } from '../ble/debugLog';
+import { debugLog, flushDebugLog, hydrateDebugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
 import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
@@ -89,6 +89,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => setAutoSyncStatusSink(setStatus), []);
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (next) => {
+      if (next !== 'active') void flushDebugLog();
+    });
+    return () => subscription.remove();
+  }, []);
   useEffect(
     () =>
       setSyncSnapshotSink((snapshot) => {
@@ -107,6 +113,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadQueue(),
         loadLastPayload(),
         loadAutoSyncState(),
+        hydrateDebugLog(),
       ]);
       if (cancelled) return;
       setSettings(storedSettings);

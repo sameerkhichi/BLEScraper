@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { getDebugLines, subscribeDebugLog } from '../ble/debugLog';
 import { openRing } from '../ble/ringClient';
+import { DebugLog } from '../components/debugLogView';
 import {
   ActivityChart,
   formatDuration,
+  formatTaken,
   HeartRateChart,
   latestNight,
   OxygenMeter,
@@ -15,7 +16,7 @@ import {
   Thermometer,
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
-import type { UploadPayload } from '../model';
+import type { UploadPayload, VitalSpot } from '../model';
 import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
 import { pauseAutoSync } from '../sync/ringGate';
 import { CATCHUP_HOURS, HISTORY_MINUTES, SLEEP_HOURS, VITALS_MINUTES } from '../sync/schedule';
@@ -38,6 +39,33 @@ function formatReading(value: number | null | undefined, suffix = ''): string {
   return typeof value === 'number' ? `${value}${suffix}` : '—';
 }
 
+function latestToday(samples: { timestamp: string }[]): string | null {
+  const now = new Date();
+  let latest: string | null = null;
+  for (const sample of samples) {
+    const date = new Date(sample.timestamp);
+    if (Number.isNaN(date.getTime())) continue;
+    if (
+      date.getFullYear() !== now.getFullYear() ||
+      date.getMonth() !== now.getMonth() ||
+      date.getDate() !== now.getDate()
+    ) {
+      continue;
+    }
+    if (!latest || sample.timestamp > latest) latest = sample.timestamp;
+  }
+  return latest;
+}
+
+function latestSpot(spots: VitalSpot[] | undefined, field: 'spo2' | 'bodyTemperatureC'): string | null {
+  let latest: string | null = null;
+  for (const spot of spots ?? []) {
+    if (typeof spot[field] !== 'number') continue;
+    if (!latest || spot.timestamp > latest) latest = spot.timestamp;
+  }
+  return latest;
+}
+
 export default function HomeScreen() {
   const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing, recordHeartRate, withRing } =
     useAppState();
@@ -49,7 +77,6 @@ export default function HomeScreen() {
   const heartStop = useRef<(() => void) | null>(null);
   const heartMounted = useRef(true);
   const bpmRef = useRef<number | null>(null);
-  const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
   const insets = useSafeAreaInsets();
   const waiting = queue.length > 0;
   const ringLabel = settings.ringName || settings.ringId || 'No ring selected';
@@ -57,6 +84,13 @@ export default function HomeScreen() {
   const newestHeartRate = latestSample(lastPayload);
   const motion = lastPayload?.accelerometer;
   const night = latestNight(lastPayload?.sleep ?? []);
+  const heartTaken =
+    heartAt != null
+      ? new Date(heartAt).toISOString()
+      : lastPayload?.realtimeHeartRateAt ?? lastPayload?.heartRate.at(-1)?.timestamp ?? null;
+  const oxygenTaken = typeof lastPayload?.spo2 === 'number' ? latestSpot(lastPayload.vitalSpots, 'spo2') : null;
+  const temperatureTaken =
+    typeof lastPayload?.bodyTemperatureC === 'number' ? latestSpot(lastPayload.vitalSpots, 'bodyTemperatureC') : null;
 
   const requireRing = (action: () => void) => {
     if (!settings.ringId) {
@@ -136,6 +170,7 @@ export default function HomeScreen() {
       >
         <Card>
           <ActivityChart steps={lastPayload?.steps ?? []} />
+          <TakenLine timestamp={latestToday(lastPayload?.steps ?? [])} />
         </Card>
 
         <Card>
@@ -149,9 +184,7 @@ export default function HomeScreen() {
                 : beats
             }
           />
-          {heartPhase === 'live' && heartAt ? (
-            <Text style={styles.meta}>Last sample {new Date(heartAt).toLocaleTimeString()}</Text>
-          ) : null}
+          <TakenLine timestamp={heartTaken} />
           {heartError ? <Text style={styles.warning}>{heartError}</Text> : null}
           {heartPhase === 'connecting' ? <ActivityIndicator color={colors.accent} /> : null}
           {heartPhase === 'idle' ? (
@@ -168,6 +201,7 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.label}>Blood oxygen</Text>
           <OxygenMeter spo2={lastPayload?.spo2 ?? null} />
+          <TakenLine timestamp={oxygenTaken} />
           <Button
             disabled={busy}
             label="Measure blood oxygen"
@@ -179,6 +213,7 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.label}>Body temperature</Text>
           <Thermometer celsius={lastPayload?.bodyTemperatureC ?? null} />
+          <TakenLine timestamp={temperatureTaken} />
           <Button
             disabled={busy}
             label="Measure body temperature"
@@ -309,15 +344,7 @@ export default function HomeScreen() {
 
         <Card>
           <Text style={styles.label}>Debug</Text>
-          {debugLines.length === 0 ? (
-            <Text style={styles.meta}>Scan or sync to fill this log. It clears when the app closes.</Text>
-          ) : (
-            debugLines.slice(0, 12).map((line, index) => (
-              <Text key={`${index}-${line}`} selectable style={styles.debug}>
-                {line}
-              </Text>
-            ))
-          )}
+          <DebugLog empty="Scan or sync to fill this log. Earlier lines stay on this phone." />
         </Card>
 
         {waiting ? null : (
@@ -332,6 +359,12 @@ export default function HomeScreen() {
       ) : null}
     </View>
   );
+}
+
+function TakenLine({ timestamp }: { timestamp: string | null }) {
+  const label = formatTaken(timestamp);
+  if (!label) return null;
+  return <Text style={styles.meta}>{label}</Text>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -387,12 +420,6 @@ const styles = StyleSheet.create({
     color: colors.danger,
     fontSize: 14,
     lineHeight: 20,
-  },
-  debug: {
-    color: colors.muted,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 12,
-    lineHeight: 17,
   },
   metrics: {
     flexDirection: 'row',

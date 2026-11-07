@@ -46,6 +46,21 @@ export function formatClock(timestamp: string): string {
   return new Date(timestamp).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
 }
 
+export function formatTaken(timestamp: string | null | undefined): string | null {
+  if (!timestamp) return null;
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return null;
+  const now = new Date();
+  const time = date.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  if (sameDay) return `Taken ${time}`;
+  const day = date.toLocaleDateString([], { month: 'short', day: 'numeric' });
+  return `Taken ${day}, ${time}`;
+}
+
 export function latestNight(nights: SleepNight[]): SleepNight | null {
   if (nights.length === 0) return null;
   return nights.reduce((latest, night) => (night.daysAgo < latest.daysAgo ? night : latest));

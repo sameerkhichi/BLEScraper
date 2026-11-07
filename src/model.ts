@@ -86,6 +86,7 @@ export type UploadPayload = {
   };
   battery: BatteryReading | null;
   realtimeHeartRate: number | null;
+  realtimeHeartRateAt?: string | null;
   spo2: number | null;
   bodyTemperatureC: number | null;
   vitalSpots: VitalSpot[];
@@ -196,6 +197,10 @@ export function mergeReadings(
     ...next,
     battery: next.battery ?? previous.battery,
     realtimeHeartRate: next.realtimeHeartRate ?? previous.realtimeHeartRate,
+    realtimeHeartRateAt:
+      typeof next.realtimeHeartRate === 'number'
+        ? next.realtimeHeartRateAt ?? next.syncedAt
+        : previous.realtimeHeartRateAt ?? null,
     spo2: next.spo2 ?? previous.spo2,
     bodyTemperatureC: next.bodyTemperatureC ?? previous.bodyTemperatureC,
     vitalSpots: pruneVitalSpots(unionByTimestamp(previous.vitalSpots ?? [], next.vitalSpots ?? []), Date.now()),
