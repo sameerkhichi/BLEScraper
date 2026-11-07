@@ -9,6 +9,7 @@ import {
   HISTORY_INTERVAL_MS,
   readingChanged,
   RETRY_INTERVAL_MS,
+  SLEEP_INTERVAL_MS,
   UPLOAD_INTERVAL_MS,
   VITALS_INTERVAL_MS,
 } from './schedule';
@@ -85,6 +86,7 @@ test('an unworn ring stays asleep until the next log interval', () => {
   );
   assert.equal(cooling.plan.logs, false);
   assert.equal(cooling.plan.vitals, false);
+  assert.equal(cooling.plan.sleep, false);
   assert.equal(cooling.waitMs, HISTORY_INTERVAL_MS - 2 * 60 * 1000);
 
   const ready = evaluateSchedule(
@@ -92,7 +94,23 @@ test('an unworn ring stays asleep until the next log interval', () => {
     t0 + HISTORY_INTERVAL_MS,
   );
   assert.equal(ready.plan.logs, true);
+  assert.equal(ready.plan.sleep, true);
   assert.equal(ready.waitMs, 0);
+});
+
+test('an open app checks sleep when that is sooner than the next log read', () => {
+  const decision = evaluateSchedule(
+    {
+      ...emptyAutoSyncState,
+      logsAt: new Date(t0).toISOString(),
+      vitalsAt: new Date(t0).toISOString(),
+      sleepAt: new Date(t0 - SLEEP_INTERVAL_MS + 60 * 1000).toISOString(),
+    },
+    t0,
+  );
+  assert.equal(decision.plan.logs, false);
+  assert.equal(decision.plan.sleep, false);
+  assert.equal(decision.waitMs, 60 * 1000);
 });
 
 test('a failed check waits out the backoff before using the radio again', () => {

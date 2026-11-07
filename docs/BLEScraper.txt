@@ -16,6 +16,7 @@ Notes
 - App will be build using react native and typescript so I can use expo
 - The Bluetooth protocal will be handled through a known react native package to scan for BLE connections. Then a reverse engineered COLMI protocol to decode the raw data coming from the ring. 
 - The app will hold pending uploads of data until connections is re-established.
+- Sleep is saved on the phone when a wake downloads it and while the app is open. The ring can be on the table. Heart rate and steps already saved stay put.
 - Will allow for HTTP/JSON communication with an API.
 - EAS Build will upload the ipa build to app store connect
 - App store connect will automatically add the app to testflight and will install on my phone
@@ -31,6 +32,10 @@ That wake reads about 7 days of stored heart rate and steps, plus the sleep nigh
 On that same wake the phone checks whether the ring is being worn. The heart-rate sensor comes on for that check. If the ring is being worn, it then takes one blood-oxygen reading and one body-temperature reading, and those lights stay on until each reading finishes. Each pair is saved with the time it was taken, in vitalSpots, and sent with the snapshot. If the ring is not being worn, those two are skipped. The ring does not store oxygen or temperature, so a wake cannot fill in the hours since the previous one. A phone that is powered off cannot take them either, because Bluetooth is off. The phone keeps about 10 days of these spots. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted.
 
 While the app is open, steps and stored heart rate are also read every 15 minutes. Live heart rate, SpO2, and body temperature are read every 30 minutes because those turn the lights on, and only when the ring is being worn. Those open-app readings are stored as vital spots too. A manual sync still reads immediately.
+
+Sleep on the phone
+
+A wake stores the sleep nights still on the ring, whether or not the ring is being worn. While the app is open, sleep is read about every 6 hours. The timer wakes for that read even if heart rate and steps are not due yet. The ring can be nearby but off a finger. That read does not turn the lights on, and it does not replace the heart-rate or step samples already saved. The nights are written into the saved reading, so the Sleep screen and the upload queue both keep them. Sync ring does the same thing if the ring is not on a finger. If the ring does not answer, the next check tries again. A failed sleep read does not wait out the full 6 hours.
 
 Ring storage
 

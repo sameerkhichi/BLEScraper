@@ -45,22 +45,30 @@ export async function collectRing(
 
   const probeWear = options?.probeWear !== false;
   let knownHeartRate: number | null = null;
+  let worn = true;
   if (probeWear) {
     report(onStatus, 'Checking that the ring is being worn');
     const wear = await client.checkWorn();
     if (!wear.wearing && wear.reportedOff) {
       report(onStatus, wear.reason);
-      return {
-        worn: false,
-        sleepLoaded: false,
-        payload: readingPayload(ringId, ringName, { warnings: [wear.reason] }),
-      };
+      worn = false;
+      warnings.push(wear.reason);
+      // Sleep stays on the ring after it comes off the finger, so this read still saves the night.
+      // Live lights and the step log stay off until it is worn again.
+      if (!plan.sleep) {
+        return {
+          worn: false,
+          sleepLoaded: false,
+          payload: readingPayload(ringId, ringName, { warnings }),
+        };
+      }
+    } else {
+      knownHeartRate = wear.wearing ? wear.bpm : null;
+      realtimeHeartRate = knownHeartRate;
     }
-    knownHeartRate = wear.wearing ? wear.bpm : null;
-    realtimeHeartRate = knownHeartRate;
   }
 
-  if (plan.logs) {
+  if (worn && plan.logs) {
     report(onStatus, 'Setting the ring clock');
     try {
       await client.setTime(new Date());
@@ -94,7 +102,7 @@ export async function collectRing(
     }
   }
 
-  if (plan.vitals) {
+  if (worn && plan.vitals) {
     const vitals = await readVitals(client, 'all', onStatus, knownHeartRate);
     realtimeHeartRate = vitals.realtimeHeartRate ?? knownHeartRate;
     spo2 = vitals.spo2;
@@ -129,7 +137,7 @@ export async function collectRing(
   if (warnings.length > 0) debugLog(warnings.join(' '));
 
   return {
-    worn: true,
+    worn,
     sleepLoaded,
     payload: readingPayload(ringId, ringName, {
       battery,

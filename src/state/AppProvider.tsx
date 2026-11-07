@@ -4,7 +4,7 @@ import { AppState } from 'react-native';
 import { closeRing } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
-import { keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
+import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
@@ -251,8 +251,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const collected = await syncRing(stored.ringId, stored.ringName, setStatus);
         await closeRing();
         if (!collected.worn) {
+          if (!collected.sleepLoaded) {
+            await markRingAsleep();
+            setStatus(collected.payload.warnings[0] ?? 'Ring is not being worn. Leaving it asleep.');
+            return;
+          }
+          const storedSleep = keepStoredSamples(previous, keepSleepRecord(previous, collected.payload));
+          await remember(storedSleep);
+          const nextQueue = enqueue(storedQueue, storedSleep);
+          await publishQueue(nextQueue);
+          await sendQueue(nextQueue, stored);
+          await markSyncCompleted({ sleep: true });
           await markRingAsleep();
-          setStatus(collected.payload.warnings[0] ?? 'Ring is not being worn. Leaving it asleep.');
           return;
         }
         const payload =
@@ -264,7 +274,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const nextQueue = enqueue(storedQueue, payload);
         await publishQueue(nextQueue);
         await sendQueue(nextQueue, stored);
-        await markSyncCompleted({ logs: true, sleep: true });
+        await markSyncCompleted({ logs: true, sleep: collected.sleepLoaded });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Sync failed.';
         debugLog(message);

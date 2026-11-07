@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { holdAndroidRadio, releaseAndroidRadio } from '../ble/androidRadio';
 import { debugLog } from '../ble/debugLog';
 import { closeRing, openRing } from '../ble/ringClient';
-import { keepStoredSamples, mergeReadings, type AppSettings, type UploadPayload } from '../model';
+import { keepSleepRecord, keepStoredSamples, mergeReadings, type AppSettings, type UploadPayload } from '../model';
 import { enqueue, flushQueue } from './queue';
 import { autoSyncPaused, runWithQueue, runWithRing } from './ringGate';
 import {
@@ -11,6 +11,7 @@ import {
   evaluateUpload,
   HISTORY_INTERVAL_MS,
   readingChanged,
+  RETRY_INTERVAL_MS,
   shouldSync,
   STORED_DAYS,
   type AutoSyncState,
@@ -207,9 +208,17 @@ export async function runAutoSync(options: { allowAndroidService: boolean }): Pr
       const client = await openRing(ringId);
       const collected = await collectRing(client, ringId, current.ringName, plan.plan, report);
       if (!collected.worn) {
+        await closeRing();
+        if (radioHeld) {
+          radioHeld = false;
+          await releaseAndroidRadio();
+        }
+        if (collected.sleepLoaded) {
+          return await runWithQueue(() => persistUnwornSleep(current, collected.payload));
+        }
         const ringWait = await markRingAsleep();
         const flushed = await runWithQueue(() => flushIfDue(current));
-        if (flushed) return flushed;
+        if (flushed) return { ...flushed, waitMs: Math.max(flushed.waitMs, ringWait) };
         const pending = await loadQueue();
         const latest = await loadAutoSyncState();
         const again = uploadDecision(current, latest.uploadAt, pending.length, Date.now());
@@ -237,17 +246,21 @@ export async function runAutoSync(options: { allowAndroidService: boolean }): Pr
         const nextQueue = changed ? enqueue(storedQueue, merged) : storedQueue;
         await saveLastPayload(merged);
         await saveQueue(nextQueue);
-        const marks = advanceMarks(await loadAutoSyncState(), plan.plan);
+        const sleepNeedsRetry = plan.plan.sleep && !collected.sleepLoaded;
+        const marks = advanceMarks(await loadAutoSyncState(), plan.plan, collected.sleepLoaded);
         await saveAutoSyncState(marks);
         snapshotSink?.({ queue: nextQueue, lastPayload: merged });
 
         const flushed = await flushIfDue(current);
-        if (flushed) return flushed;
+        if (flushed) return { ...flushed, waitMs: withSleepRetry(flushed.waitMs, sleepNeedsRetry) };
 
         const latest = await loadAutoSyncState();
         const checkedAt = Date.now();
         const again = uploadDecision(current, latest.uploadAt, nextQueue.length, checkedAt);
-        const waitMs = combineWait(evaluateSchedule(latest, checkedAt).waitMs, again.waitMs);
+        const waitMs = withSleepRetry(
+          combineWait(evaluateSchedule(latest, checkedAt).waitMs, again.waitMs),
+          sleepNeedsRetry,
+        );
         if (!current.apiUrl.trim()) {
           return {
             outcome: 'saved' as const,
@@ -291,16 +304,60 @@ function withSleep(previous: UploadPayload | null, next: UploadPayload, sleepLoa
   return { ...next, sleep: previous.sleep };
 }
 
-function advanceMarks(state: AutoSyncState, plan: SyncPlan): AutoSyncState {
+async function persistUnwornSleep(settings: AppSettings, incoming: UploadPayload): Promise<AutoSyncResult> {
+  const previous = await loadLastPayload();
+  const merged = keepStoredSamples(previous, keepSleepRecord(previous, incoming));
+  merged.syncedAt = new Date().toISOString();
+  const changed = readingChanged(previous, merged);
+  const storedQueue = await loadQueue();
+  const nextQueue = changed ? enqueue(storedQueue, merged) : storedQueue;
+  await saveLastPayload(merged);
+  await saveQueue(nextQueue);
+  await markSyncCompleted({ sleep: true });
+  snapshotSink?.({ queue: nextQueue, lastPayload: merged });
+  const ringWait = await markRingAsleep();
+
+  const flushed = await flushIfDue(settings);
+  if (flushed) return { ...flushed, waitMs: Math.max(flushed.waitMs, ringWait) };
+
+  const latest = await loadAutoSyncState();
+  const checkedAt = Date.now();
+  const again = uploadDecision(settings, latest.uploadAt, nextQueue.length, checkedAt);
+  const waitMs = combineWait(Math.max(evaluateSchedule(latest, checkedAt).waitMs, ringWait), again.waitMs);
+  const note = 'Ring is not being worn.';
+  if (!settings.apiUrl.trim()) {
+    return {
+      outcome: 'saved',
+      waitMs,
+      message: changed ? `Saved sleep on the phone. ${note}` : `${note} Sleep is already saved.`,
+    };
+  }
+  if (nextQueue.length === 0) {
+    return { outcome: 'saved', waitMs, message: changed ? `Saved sleep. ${note}` : `${note} Sleep is already saved.` };
+  }
+  const readings = `${nextQueue.length} reading${nextQueue.length === 1 ? '' : 's'}`;
+  return {
+    outcome: 'saved',
+    waitMs,
+    message: changed ? `Saved sleep on the phone. ${readings} waiting until the next hourly send. ${note}` : `${note} ${readings} waiting until the next hourly send.`,
+  };
+}
+
+function advanceMarks(state: AutoSyncState, plan: SyncPlan, sleepLoaded: boolean): AutoSyncState {
   const now = new Date().toISOString();
   return {
     logsAt: plan.logs ? now : state.logsAt,
     vitalsAt: plan.vitals ? now : state.vitalsAt,
-    sleepAt: plan.sleep ? now : state.sleepAt,
+    sleepAt: plan.sleep && sleepLoaded ? now : state.sleepAt,
     failedAt: null,
     asleepAt: null,
     uploadAt: state.uploadAt,
   };
+}
+
+function withSleepRetry(waitMs: number, sleepNeedsRetry: boolean): number {
+  if (!sleepNeedsRetry) return waitMs;
+  return Math.max(waitMs, RETRY_INTERVAL_MS);
 }
 
 function uploadDecision(

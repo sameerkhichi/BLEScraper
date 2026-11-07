@@ -74,7 +74,11 @@ export function evaluateSchedule(state: AutoSyncState, now: number): { plan: Syn
     return {
       plan,
       waitMs: clampWait(
-        Math.min(remaining(state.logsAt, HISTORY_INTERVAL_MS, now), remaining(state.vitalsAt, VITALS_INTERVAL_MS, now)),
+        Math.min(
+          remaining(state.logsAt, HISTORY_INTERVAL_MS, now),
+          remaining(state.vitalsAt, VITALS_INTERVAL_MS, now),
+          remaining(state.sleepAt, SLEEP_INTERVAL_MS, now),
+        ),
       ),
     };
   }

@@ -176,6 +176,16 @@ function unionByTimestamp<T extends { timestamp: string }>(previous: T[], next: 
   return [...byTime.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
+// Sleep can arrive without a new heart-rate or step log. Keep the samples already stored.
+export function keepSleepRecord(previous: UploadPayload | null, incoming: UploadPayload): UploadPayload {
+  if (!previous) return incoming;
+  return {
+    ...previous,
+    syncedAt: incoming.syncedAt,
+    sleep: incoming.sleep,
+  };
+}
+
 export function mergeReadings(
   previous: UploadPayload | null,
   next: UploadPayload,

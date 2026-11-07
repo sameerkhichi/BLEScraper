@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { keepStoredSamples, mergeReadings, type UploadPayload } from '../model';
+import { keepSleepRecord, keepStoredSamples, mergeReadings, type UploadPayload } from '../model';
 import { enqueue, flushQueue } from './queue';
 
 function sample(bpm: number): UploadPayload {
@@ -110,4 +110,35 @@ test('a live reading keeps the last sleep night and a sync replaces it', () => {
 
   assert.equal(mergeReadings(previous, next, true).sleep[0].minutesAsleep, 400);
   assert.equal(mergeReadings(previous, next, false).sleep.length, 0);
+});
+
+test('a sleep read keeps stored heart rate and steps', () => {
+  const previous = sample(72);
+  previous.heartRate = [{ timestamp: '2026-11-06T04:00:00.000Z', bpm: 54 }];
+  previous.steps = [{ timestamp: '2026-11-06T00:00:00.000Z', steps: 10, calories: 1, distanceMeters: 8 }];
+  const incoming = sample(0);
+  incoming.syncedAt = '2026-11-06T12:00:00.000Z';
+  incoming.sleep = [
+    {
+      daysAgo: 0,
+      startedAt: '2026-11-05T23:00:00.000Z',
+      endedAt: '2026-11-06T07:00:00.000Z',
+      minutesAsleep: 420,
+      minutesInBed: 480,
+      minutesLight: 200,
+      minutesDeep: 120,
+      minutesRem: 100,
+      minutesAwake: 20,
+      minutesUnknown: 0,
+      awakenings: 1,
+      stages: [],
+      cycles: [],
+    },
+  ];
+
+  const saved = keepStoredSamples(previous, keepSleepRecord(previous, incoming));
+  assert.equal(saved.sleep[0].minutesAsleep, 420);
+  assert.equal(saved.heartRate.length, 1);
+  assert.equal(saved.steps[0].steps, 10);
+  assert.equal(saved.realtimeHeartRate, 72);
 });
