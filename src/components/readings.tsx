@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
-import type { SleepNight, SleepStageName, StepSample } from '../model';
+import { activityForLocalDay, type SleepNight, type SleepStageName, type StepSample } from '../model';
 import { colors } from './ui';
 
 const COLD = '#6ea8ff';
@@ -80,13 +80,7 @@ export function sleepQuality(night: SleepNight): { score: number; label: string 
 }
 
 export function ActivityChart({ steps }: { steps: StepSample[] }) {
-  let stepTotal = 0;
-  let calories = 0;
-  for (const sample of steps) {
-    if (!isSameLocalDay(sample.timestamp)) continue;
-    stepTotal += sample.steps;
-    calories += sample.calories;
-  }
+  const today = activityForLocalDay(steps);
 
   return (
     <View style={styles.block}>
@@ -95,18 +89,20 @@ export function ActivityChart({ steps }: { steps: StepSample[] }) {
         <View style={styles.activityStat}>
           <View style={styles.activityCircle}>
             <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
-              {formatCount(stepTotal)}
+              {formatCount(today.steps)}
             </Text>
           </View>
+          <Text style={styles.caption}>{formatDistance(today.distanceMeters)}</Text>
           <Text style={styles.activityIcon}>👟</Text>
           <Text style={styles.meta}>Steps</Text>
         </View>
         <View style={styles.activityStat}>
           <View style={styles.activityCircle}>
             <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
-              {formatCount(calories)}
+              {formatCount(today.calories)}
             </Text>
           </View>
+          <Text style={styles.caption}>{'\u00a0'}</Text>
           <Text style={styles.activityIcon}>🔥</Text>
           <Text style={styles.meta}>Calories</Text>
         </View>
@@ -358,17 +354,13 @@ function qualityColor(label: string): string {
   return colors.danger;
 }
 
-function isSameLocalDay(timestamp: string, now = new Date()): boolean {
-  const date = new Date(timestamp);
-  return (
-    date.getFullYear() === now.getFullYear() &&
-    date.getMonth() === now.getMonth() &&
-    date.getDate() === now.getDate()
-  );
-}
-
 function formatCount(value: number): string {
   return Math.round(value).toLocaleString();
+}
+
+function formatDistance(meters: number): string {
+  if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
+  return `${Math.round(meters)} m`;
 }
 
 function oxygenBand(spo2: number): { label: string; color: string } {

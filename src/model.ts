@@ -33,6 +33,35 @@ export type StepSample = {
   distanceMeters: number;
 };
 
+export type LocalDayActivity = {
+  steps: number;
+  calories: number;
+  distanceMeters: number;
+};
+
+// Slots are stored as UTC instants. Today is the phone's calendar day, so a late
+// local evening still counts after its UTC date has rolled over.
+export function activityForLocalDay(steps: StepSample[], now = new Date()): LocalDayActivity {
+  const total: LocalDayActivity = { steps: 0, calories: 0, distanceMeters: 0 };
+  for (const sample of steps) {
+    if (!isSameLocalDay(sample.timestamp, now)) continue;
+    total.steps += sample.steps;
+    total.calories += sample.calories;
+    total.distanceMeters += sample.distanceMeters;
+  }
+  return total;
+}
+
+function isSameLocalDay(timestamp: string, now: Date): boolean {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return false;
+  return (
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
+  );
+}
+
 export type AccelReading = {
   x: number;
   y: number;

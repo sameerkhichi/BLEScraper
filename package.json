@@ -30,7 +30,7 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/ble/protocol.test.ts src/ble/sleep.test.ts src/ble/scanList.test.ts src/sync/batteryAlert.test.ts src/sync/queue.test.ts src/sync/schedule.test.ts"
+    "test": "tsx --test src/ble/protocol.test.ts src/ble/sleep.test.ts src/ble/scanList.test.ts src/model.test.ts src/sync/batteryAlert.test.ts src/sync/queue.test.ts src/sync/schedule.test.ts"
   },
   "private": true,
   "overrides": {
