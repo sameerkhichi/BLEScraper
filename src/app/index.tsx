@@ -16,7 +16,9 @@ import {
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
 import type { UploadPayload } from '../model';
+import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
 import { pauseAutoSync } from '../sync/ringGate';
+import { CATCHUP_HOURS, HISTORY_MINUTES, SLEEP_HOURS, VITALS_MINUTES } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 const BEAT_POINTS = 40;
@@ -269,11 +271,32 @@ export default function HomeScreen() {
         </Card>
 
         <Button disabled={busy} label="Sync ring" onPress={syncRing} />
-        <Text style={styles.meta}>
-          {settings.autoSync
-            ? 'The phone wakes a couple of times a day, downloads the stored record, takes blood oxygen and temperature when the ring is being worn, sends them, and disconnects.'
-            : 'Automatic download is off. Turn it on in API settings.'}
-        </Text>
+
+        <Card>
+          <Text style={styles.label}>Notes</Text>
+          <View style={styles.notes}>
+            {settings.autoSync ? (
+              <>
+                <Text style={styles.body}>
+                  Leave BLEScraper in the app switcher. The screen can be off, and another app can be in front.
+                </Text>
+                <Text style={styles.body}>
+                  Steps and stored heart rate are read every {HISTORY_MINUTES} minutes while BLEScraper is on screen. Live heart rate, SpO2, and temperature run every {VITALS_MINUTES} minutes. Sleep is read about every {SLEEP_HOURS} hours. Each check connects, reads, and disconnects.
+                </Text>
+                <Text style={styles.body}>
+                  With the screen off or another app in front, that timer pauses. Opening BLEScraper runs a check when one is due. About every {CATCHUP_HOURS} hours the phone wakes on its own, downloads the stored record, and if the ring is being worn takes one blood-oxygen and temperature reading. Then it sends and disconnects. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks.
+                </Text>
+                <Text style={styles.body}>
+                  iOS chooses the wake time and will not wake the app after you swipe it away. Android shows a notification only while a download is running.
+                </Text>
+              </>
+            ) : (
+              <Text style={styles.body}>
+                Automatic download is off. Turn it on in API settings. With it on, leave BLEScraper in the app switcher. Checks every {HISTORY_MINUTES} minutes run while the app is on screen. With the screen off or another app in front, the phone wakes about every {CATCHUP_HOURS} hours.
+              </Text>
+            )}
+          </View>
+        </Card>
 
         <Card>
           <Text style={styles.label}>Status</Text>
@@ -345,6 +368,9 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     textTransform: 'uppercase',
+  },
+  notes: {
+    gap: 10,
   },
   body: {
     color: colors.text,
