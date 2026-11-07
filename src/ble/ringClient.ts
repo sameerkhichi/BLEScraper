@@ -56,6 +56,8 @@ const WEAR_PROBE_MS = 8000;
 
 export const NOT_WORN_MESSAGE = 'Ring is not being worn. Leaving it asleep.';
 
+export type HeartRateFrame = { kind: 'bpm'; bpm: number } | { kind: 'ppg'; value: number };
+
 export type WearCheck =
   | { wearing: true; bpm: number }
   | { wearing: false; reportedOff: boolean; reason: string };
@@ -107,6 +109,7 @@ export class RingClient {
   private listeners = new Map<number, (packet: Uint8Array) => void>();
   private aborts = new Set<(error: Error) => void>();
   private motionStop: (() => void) | null = null;
+  private heartStop: (() => void) | null = null;
   private tail: Promise<void> = Promise.resolve();
 
   private constructor(private device: Device) {}
@@ -340,6 +343,62 @@ export class RingClient {
 
   stopMotion(): void {
     this.motionStop?.();
+  }
+
+  async watchHeartRate(onFrame: (frame: HeartRateFrame) => void): Promise<void> {
+    return this.run(async () => {
+      try {
+        await new Promise<void>((resolve, reject) => {
+          let settled = false;
+          const finish = () => {
+            if (settled) return;
+            settled = true;
+            this.heartStop = null;
+            this.listeners.delete(CMD_START_REAL_TIME);
+            this.listeners.delete(CMD_RAW_SENSOR);
+            this.aborts.delete(abort);
+            resolve();
+          };
+          const abort = (error: Error) => {
+            if (settled) return;
+            settled = true;
+            this.heartStop = null;
+            this.listeners.delete(CMD_START_REAL_TIME);
+            this.listeners.delete(CMD_RAW_SENSOR);
+            this.aborts.delete(abort);
+            reject(error);
+          };
+          this.aborts.add(abort);
+          this.heartStop = finish;
+          this.listeners.set(CMD_START_REAL_TIME, (packet) => {
+            const bpm = parseLiveHeartRate(packet);
+            if (bpm !== null) {
+              onFrame({ kind: 'bpm', bpm });
+              return;
+            }
+            if (classifyWear(packet) === 'off') abort(new Error(NOT_WORN_MESSAGE));
+          });
+          this.listeners.set(CMD_RAW_SENSOR, (packet) => {
+            const frame = parseRawSensor(packet);
+            if (frame?.kind === 'ppg') onFrame({ kind: 'ppg', value: frame.value });
+          });
+          this.send(startHeartRatePacket())
+            .then(() => this.send(rawSensorPacket(RAW_SENSOR_ENABLE)))
+            .catch(abort);
+        });
+      } finally {
+        try {
+          await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
+        } catch {
+          // The stop command can fail after the ring has already ended the reading.
+        }
+        await this.stopRawSensors();
+      }
+    });
+  }
+
+  stopHeartRate(): void {
+    this.heartStop?.();
   }
 
   private async stopRawSensors(): Promise<void> {

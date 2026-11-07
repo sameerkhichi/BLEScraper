@@ -1,9 +1,10 @@
 import { router } from 'expo-router';
-import { useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { getDebugLines, subscribeDebugLog } from '../ble/debugLog';
+import { openRing } from '../ble/ringClient';
 import {
   ActivityChart,
   formatDuration,
@@ -15,7 +16,16 @@ import {
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
 import type { UploadPayload } from '../model';
+import { pauseAutoSync } from '../sync/ringGate';
 import { useAppState } from '../state/AppProvider';
+
+const WAVE_POINTS = 72;
+
+function pulseSample(phase: number): number {
+  if (phase < 0.12) return Math.sin((phase / 0.12) * Math.PI);
+  if (phase < 0.2) return 0.18 * Math.sin(((phase - 0.12) / 0.08) * Math.PI);
+  return 0;
+}
 
 function totalSteps(payload: { steps: { steps: number }[] } | null): number {
   if (!payload) return 0;
@@ -33,7 +43,16 @@ function formatReading(value: number | null | undefined, suffix = ''): string {
 }
 
 export default function HomeScreen() {
-  const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing } = useAppState();
+  const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing, recordHeartRate, withRing } =
+    useAppState();
+  const [heartPhase, setHeartPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
+  const [liveBpm, setLiveBpm] = useState<number | null>(null);
+  const [wave, setWave] = useState<number[]>([]);
+  const [heartError, setHeartError] = useState<string | null>(null);
+  const heartStop = useRef<(() => void) | null>(null);
+  const heartMounted = useRef(true);
+  const bpmRef = useRef<number | null>(null);
+  const usingPpg = useRef(false);
   const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
   const insets = useSafeAreaInsets();
   const waiting = queue.length > 0;
@@ -49,6 +68,79 @@ export default function HomeScreen() {
       return;
     }
     action();
+  };
+
+  useEffect(() => {
+    heartMounted.current = true;
+    return () => {
+      heartMounted.current = false;
+      heartStop.current?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (heartPhase !== 'live') return;
+    const started = Date.now();
+    const timer = setInterval(() => {
+      if (usingPpg.current) return;
+      const bpm = bpmRef.current;
+      if (bpm === null || bpm <= 0) return;
+      const period = 60 / bpm;
+      const elapsedSec = (Date.now() - started) / 1000;
+      setWave((current) => [...current, pulseSample((elapsedSec % period) / period)].slice(-WAVE_POINTS));
+    }, 50);
+    return () => clearInterval(timer);
+  }, [heartPhase]);
+
+  const startHeart = async () => {
+    if (!settings.ringId) {
+      router.push('/scan');
+      return;
+    }
+    const ringId = settings.ringId;
+    setHeartError(null);
+    setWave([]);
+    setHeartPhase('connecting');
+    bpmRef.current = null;
+    usingPpg.current = false;
+    const session = { cancel: false, stop: null as (() => void) | null };
+    heartStop.current = () => {
+      session.cancel = true;
+      session.stop?.();
+    };
+    const resume = pauseAutoSync();
+    try {
+      await withRing(async () => {
+        const client = await openRing(ringId);
+        session.stop = () => client.stopHeartRate();
+        if (session.cancel) return;
+        if (heartMounted.current) setHeartPhase('live');
+        await client.watchHeartRate((frame) => {
+          if (!heartMounted.current) return;
+          if (frame.kind === 'bpm') {
+            bpmRef.current = frame.bpm;
+            setLiveBpm(frame.bpm);
+            return;
+          }
+          if (!usingPpg.current) {
+            usingPpg.current = true;
+            setWave([frame.value]);
+            return;
+          }
+          setWave((current) => [...current, frame.value].slice(-WAVE_POINTS));
+        });
+      });
+    } catch (caught) {
+      if (heartMounted.current && !session.cancel) {
+        setHeartError(caught instanceof Error ? caught.message : 'The heart-rate monitor stopped.');
+      }
+    } finally {
+      resume();
+      heartStop.current = null;
+      if (heartMounted.current) setHeartPhase('idle');
+      const bpm = bpmRef.current;
+      if (bpm !== null) void recordHeartRate(bpm);
+    }
   };
 
   const syncRing = () => {
@@ -71,13 +163,18 @@ export default function HomeScreen() {
 
         <Card>
           <Text style={styles.label}>Heart rate</Text>
-          <HeartRateChart bpm={lastPayload?.realtimeHeartRate ?? null} samples={lastPayload?.heartRate ?? []} />
-          <Button
-            disabled={busy}
-            label="Measure heart rate"
-            onPress={() => requireRing(() => void scan('heart-rate'))}
-            tone="secondary"
-          />
+          <HeartRateChart bpm={liveBpm ?? lastPayload?.realtimeHeartRate ?? null} wave={wave} />
+          {heartError ? <Text style={styles.warning}>{heartError}</Text> : null}
+          {heartPhase === 'connecting' ? <ActivityIndicator color={colors.accent} /> : null}
+          {heartPhase === 'idle' ? (
+            <Button disabled={busy} label="Measure heart rate" onPress={() => void startHeart()} tone="secondary" />
+          ) : (
+            <Button
+              label={heartPhase === 'connecting' ? 'Cancel' : 'Stop'}
+              onPress={() => heartStop.current?.()}
+              tone="danger"
+            />
+          )}
         </Card>
 
         <Card>

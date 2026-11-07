@@ -1,13 +1,13 @@
 import { StyleSheet, Text, View } from 'react-native';
 
-import type { HeartRateSample, SleepNight, SleepStageName, StepSample } from '../model';
+import type { SleepNight, SleepStageName, StepSample } from '../model';
 import { colors } from './ui';
 
 const COLD = '#6ea8ff';
 const WARN = '#f0c36a';
 const TEMP_MIN = 35;
 const TEMP_MAX = 40;
-const SPARK_POINTS = 36;
+const TRACE_HEIGHT = 76;
 
 const stageColor: Record<SleepStageName, string> = {
   light: '#7fbf8a',
@@ -99,9 +99,7 @@ export function ActivityChart({ steps }: { steps: StepSample[] }) {
   );
 }
 
-export function HeartRateChart({ bpm, samples }: { bpm: number | null; samples: HeartRateSample[] }) {
-  const values = seriesForChart(samples);
-  const caption = heartCaption(samples);
+export function HeartRateChart({ bpm, wave }: { bpm: number | null; wave: number[] }) {
   return (
     <View style={styles.heartRow}>
       <View>
@@ -109,20 +107,24 @@ export function HeartRateChart({ bpm, samples }: { bpm: number | null; samples: 
         <Text style={styles.meta}>bpm</Text>
       </View>
       <View style={styles.sparkWrap}>
-        {values.length === 0 ? (
-          <Text style={styles.meta}>No stored heart rate yet.</Text>
-        ) : (
-          <>
-            <View style={styles.spark}>
-              {values.map((value, index) => (
-                <View key={`${index}-${value}`} style={[styles.sparkBar, { height: sparkHeight(value) }]} />
-              ))}
-            </View>
-            <View style={styles.sparkBaseline} />
-            {caption ? <Text style={styles.caption}>{caption}</Text> : null}
-          </>
-        )}
+        {wave.length < 2 ? <Text style={styles.meta}>Measure to watch the pulse.</Text> : <PulseTrace values={wave} />}
       </View>
+    </View>
+  );
+}
+
+function PulseTrace({ values }: { values: number[] }) {
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+  return (
+    <View style={styles.trace}>
+      <View style={styles.traceBaseline} />
+      {values.map((value, index) => (
+        <View key={index} style={styles.traceColumn}>
+          <View style={[styles.traceMark, { top: ((max - value) / span) * (TRACE_HEIGHT - 6) }]} />
+        </View>
+      ))}
     </View>
   );
 }
@@ -289,36 +291,6 @@ function formatCount(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
-function seriesForChart(samples: HeartRateSample[]): number[] {
-  const ordered = [...samples].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
-  const today = ordered.filter((sample) => isSameUtcDay(sample.timestamp));
-  const chosen = today.length > 0 ? today : ordered;
-  return downsample(
-    chosen.map((sample) => sample.bpm),
-    SPARK_POINTS,
-  );
-}
-
-function heartCaption(samples: HeartRateSample[]): string | null {
-  if (samples.length === 0) return null;
-  return samples.some((sample) => isSameUtcDay(sample.timestamp)) ? 'Today, UTC' : 'Recent';
-}
-
-function downsample(values: number[], maxPoints: number): number[] {
-  if (values.length <= maxPoints) return values;
-  const sampled: number[] = [];
-  const step = (values.length - 1) / (maxPoints - 1);
-  for (let index = 0; index < maxPoints; index += 1) {
-    sampled.push(values[Math.round(index * step)] ?? 0);
-  }
-  return sampled;
-}
-
-function sparkHeight(bpm: number): number {
-  const clamped = Math.max(40, Math.min(180, bpm));
-  return 4 + ((clamped - 40) / 140) * 52;
-}
-
 function oxygenBand(spo2: number): { label: string; color: string } {
   if (spo2 < 90) return { label: 'Low', color: colors.danger };
   if (spo2 < 95) return { label: 'Borderline', color: WARN };
@@ -418,23 +390,29 @@ const styles = StyleSheet.create({
     gap: 4,
     minWidth: 120,
   },
-  spark: {
-    alignItems: 'flex-end',
+  trace: {
     flexDirection: 'row',
-    gap: 2,
-    height: 64,
+    height: TRACE_HEIGHT,
   },
-  sparkBar: {
-    backgroundColor: colors.accent,
-    borderRadius: 2,
-    flexBasis: 0,
-    flexGrow: 1,
-    maxWidth: 8,
-    minWidth: 2,
-  },
-  sparkBaseline: {
+  traceBaseline: {
     backgroundColor: colors.line,
     height: 1,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    top: TRACE_HEIGHT / 2,
+  },
+  traceColumn: {
+    flex: 1,
+    height: TRACE_HEIGHT,
+  },
+  traceMark: {
+    backgroundColor: colors.accent,
+    borderRadius: 2,
+    height: 4,
+    left: 0,
+    position: 'absolute',
+    right: 0,
   },
   meter: {
     height: 22,
