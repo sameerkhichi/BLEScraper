@@ -43,6 +43,14 @@
     "plugins": [
       "expo-router",
       [
+        "expo-notifications",
+        {
+          "color": "#ff2a2a",
+          "defaultChannel": "ring-battery",
+          "enableRemoteNotifications": false
+        }
+      ],
+      [
         "@sfourdrinier/react-native-ble-plx",
         {
           "isBackgroundEnabled": true,

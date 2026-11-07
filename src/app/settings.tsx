@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { Button, colors } from '../components/ui';
+import { LOW_BATTERY_PERCENT, LOW_BATTERY_REMIND_HOURS } from '../sync/batteryAlert';
 import { CATCHUP_HOURS, HISTORY_MINUTES, VITALS_MINUTES } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
@@ -56,6 +57,9 @@ export default function SettingsScreen() {
             value={autoSync}
           />
         </View>
+        <Text style={styles.body}>
+          The phone notifies you when the ring battery is below {LOW_BATTERY_PERCENT}%. It notifies again if the level drops, and every {LOW_BATTERY_REMIND_HOURS} hours while it stays that low.
+        </Text>
         <Text style={styles.label}>API URL</Text>
         <TextInput
           autoCapitalize="none"

@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { defaultSettings, isAccelSample, isSleepNight, isVitalSpot, type AppSettings, type UploadPayload } from '../model';
 import type { PendingUpload } from './queue';
+import { reportBattery } from './notifyBattery';
 import { emptyAutoSyncState, type AutoSyncState } from './schedule';
 
 const SETTINGS_KEY = 'blescraper.settings';
@@ -53,6 +54,7 @@ export async function loadLastPayload(): Promise<UploadPayload | null> {
 
 export async function saveLastPayload(payload: UploadPayload): Promise<void> {
   await AsyncStorage.setItem(LAST_KEY, JSON.stringify(payload));
+  await reportBattery(payload.battery);
 }
 
 export async function loadAutoSyncState(): Promise<AutoSyncState> {
