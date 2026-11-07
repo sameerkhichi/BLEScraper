@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 import { debugLog } from '../ble/debugLog';
 import { closeRing } from '../ble/ringClient';
 import { runCatchUp } from './autoSync';
+import { notifyBackgroundWake } from './notifyBattery';
 import { CATCHUP_HOURS, CATCHUP_INTERVAL_MINUTES } from './schedule';
 
 export const AUTO_SYNC_TASK = 'blescraper-auto-sync';
@@ -14,7 +15,10 @@ let expirationBound = false;
 // Defined at import time so a background launch can find the task before React mounts.
 if (Platform.OS !== 'web') {
   TaskManager.defineTask(AUTO_SYNC_TASK, async () => {
+    const startedAt = new Date();
+    debugLog(`Background wake at ${startedAt.toISOString()}`);
     try {
+      await notifyBackgroundWake(startedAt);
       await runCatchUp();
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch (error) {
@@ -49,7 +53,12 @@ export async function syncBackgroundRegistration(enabled: boolean): Promise<void
       debugLog('Background sync is not available on this device.');
       return;
     }
-    if (registered) await BackgroundTask.unregisterTaskAsync(AUTO_SYNC_TASK);
+    // Leave a pending wake alone. Cancelling and registering again starts the 8 hour wait over,
+    // so the download only ran when the app was opened.
+    if (registered) {
+      debugLog(`Background download already scheduled, about every ${CATCHUP_HOURS} hours.`);
+      return;
+    }
     await BackgroundTask.registerTaskAsync(AUTO_SYNC_TASK, { minimumInterval: CATCHUP_INTERVAL_MINUTES });
     debugLog(`Background download registered, about every ${CATCHUP_HOURS} hours.`);
   } catch (error) {

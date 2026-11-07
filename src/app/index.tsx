@@ -288,7 +288,7 @@ export default function HomeScreen() {
                   With the screen off or another app in front, that timer pauses. Opening BLEScraper runs a check when one is due. About every {CATCHUP_HOURS} hours the phone wakes on its own, downloads the stored record, and if the ring is being worn takes one blood-oxygen and temperature reading. Then it sends and disconnects. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks.
                 </Text>
                 <Text style={styles.body}>
-                  iOS chooses the wake time and will not wake the app after you swipe it away. Android shows a notification only while a download is running.
+                  A notification appears when that wake starts, separate from opening the app. iOS chooses the wake time and will not wake the app after you swipe it away. Android also shows a notification while a download is running.
                 </Text>
               </>
             ) : (

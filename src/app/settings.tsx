@@ -46,7 +46,7 @@ export default function SettingsScreen() {
             <Text style={styles.body}>
               While BLEScraper is on screen, steps and stored heart rate are read every {HISTORY_MINUTES} minutes. Live heart rate, SpO2, and temperature run every {VITALS_MINUTES} minutes. Sleep is read about every {SLEEP_HOURS} hours. Each check connects, reads, and disconnects.
               With the screen off or another app in front, that timer pauses. Leave the app in the switcher. About every {CATCHUP_HOURS} hours the phone wakes on its own, downloads the stored record, and if the ring is being worn takes one blood-oxygen and temperature reading. Then it sends and disconnects. Opening the app runs a check when one is due.
-              iOS chooses the wake time and will not wake the app after you swipe it away. Android shows a notification only while a download is running.
+              A notification appears when that wake starts, separate from opening the app. iOS chooses the wake time and will not wake the app after you swipe it away. Android also shows a notification while a download is running.
             </Text>
           </View>
           <Switch

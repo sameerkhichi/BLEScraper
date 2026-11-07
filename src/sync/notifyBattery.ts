@@ -8,11 +8,12 @@ import { batteryAlertCopy, nextBatteryNotice, type BatteryNotice } from './batte
 const NOTICE_KEY = 'blescraper.batteryNotice';
 const CHANNEL_ID = 'ring-battery';
 const NOTIFICATION_ID = 'ring-battery-low';
+const WAKE_CHANNEL_ID = 'ring-wake';
 
 type NotificationsModule = typeof import('expo-notifications');
 
 let notificationsModule: Promise<NotificationsModule | null> | null = null;
-let channelReady: Promise<void> | null = null;
+const channelReady = new Map<string, Promise<void>>();
 let permissionRequested = false;
 let loggedMissingPermission = false;
 let delivery: Promise<void> = Promise.resolve();
@@ -29,6 +30,39 @@ export async function ensureNotificationPermission(request: boolean): Promise<bo
     ios: { allowAlert: true, allowBadge: false, allowSound: true },
   });
   return next.status === 'granted';
+}
+
+export async function notifyBackgroundWake(startedAt: Date): Promise<void> {
+  try {
+    const notifications = await loadNotifications();
+    if (!notifications) return;
+    await ensureWakeChannel(notifications);
+    const allowed = await ensureNotificationPermission(false);
+    if (!allowed) {
+      debugLog('Background wake notification skipped. Notification permission is off.');
+      return;
+    }
+    const when = startedAt.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    });
+    await notifications.scheduleNotificationAsync({
+      identifier: `ring-wake-${startedAt.getTime()}`,
+      content: {
+        title: 'BLEScraper woke up',
+        body: `Background download started ${when}.`,
+        sound: 'default',
+        interruptionLevel: 'active',
+        data: { kind: 'background-wake', startedAt: startedAt.toISOString() },
+      },
+      trigger: Platform.OS === 'android' ? { channelId: WAKE_CHANNEL_ID } : null,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not send the wake notification.';
+    debugLog(message);
+  }
 }
 
 export function reportBattery(battery: BatteryReading | null): Promise<void> {
@@ -104,21 +138,35 @@ function loadNotifications(): Promise<NotificationsModule | null> {
 }
 
 function ensureChannel(notifications: NotificationsModule): Promise<void> {
+  return ensureAndroidChannel(notifications, CHANNEL_ID, 'Ring battery', [0, 250, 250, 250]);
+}
+
+function ensureWakeChannel(notifications: NotificationsModule): Promise<void> {
+  return ensureAndroidChannel(notifications, WAKE_CHANNEL_ID, 'Background wake', [0, 200]);
+}
+
+function ensureAndroidChannel(
+  notifications: NotificationsModule,
+  channelId: string,
+  name: string,
+  vibrationPattern: number[],
+): Promise<void> {
   if (Platform.OS !== 'android') return Promise.resolve();
-  if (!channelReady) {
-    channelReady = notifications
-      .setNotificationChannelAsync(CHANNEL_ID, {
-        name: 'Ring battery',
-        importance: notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-      })
-      .then(() => undefined)
-      .catch((error: unknown) => {
-        channelReady = null;
-        throw error;
-      });
-  }
-  return channelReady;
+  const pending = channelReady.get(channelId);
+  if (pending) return pending;
+  const created = notifications
+    .setNotificationChannelAsync(channelId, {
+      name,
+      importance: notifications.AndroidImportance.HIGH,
+      vibrationPattern,
+    })
+    .then(() => undefined)
+    .catch((error: unknown) => {
+      channelReady.delete(channelId);
+      throw error;
+    });
+  channelReady.set(channelId, created);
+  return created;
 }
 
 async function loadNotice(): Promise<BatteryNotice | null> {
