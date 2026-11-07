@@ -2,15 +2,15 @@ import type { ReactNode } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 export const colors = {
-  bg: '#101410',
-  card: '#1a221c',
-  line: '#2d3a31',
-  text: '#f3f6f1',
-  muted: '#9aa89a',
-  accent: '#d6f25c',
-  accentText: '#17200a',
-  danger: '#ff8b78',
-  ok: '#9be7b0',
+  bg: '#000000',
+  card: '#141414',
+  line: '#3f1d1d',
+  text: '#f4f4f4',
+  muted: '#a0a0a0',
+  accent: '#ff2a2a',
+  accentText: '#1a0505',
+  danger: '#ff6b6b',
+  ok: '#3ddc84',
 };
 
 export function Card({ children }: { children: ReactNode }) {

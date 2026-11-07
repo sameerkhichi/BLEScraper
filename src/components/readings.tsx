@@ -11,7 +11,7 @@ const SPARK_POINTS = 36;
 
 const stageColor: Record<SleepStageName, string> = {
   light: '#7fbf8a',
-  deep: colors.accent,
+  deep: '#6ea8ff',
   rem: WARN,
   awake: colors.danger,
   unknown: colors.muted,
@@ -64,56 +64,58 @@ export function sleepQuality(night: SleepNight): { score: number; label: string 
 }
 
 export function ActivityChart({ steps }: { steps: StepSample[] }) {
-  const hourly = Array.from({ length: 24 }, () => 0);
   let stepTotal = 0;
   let calories = 0;
   for (const sample of steps) {
     if (!isSameUtcDay(sample.timestamp)) continue;
     stepTotal += sample.steps;
     calories += sample.calories;
-    hourly[new Date(sample.timestamp).getUTCHours()] += sample.steps;
   }
-  const peak = Math.max(...hourly);
 
   return (
     <View style={styles.block}>
       <Text style={styles.label}>Today</Text>
       <View style={styles.activityRow}>
         <View style={styles.activityStat}>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
-            {formatCount(stepTotal)}
-          </Text>
+          <View style={styles.activityCircle}>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
+              {formatCount(stepTotal)}
+            </Text>
+          </View>
+          <ShoeOutline />
           <Text style={styles.meta}>Steps</Text>
         </View>
         <View style={styles.activityStat}>
-          <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
-            {formatCount(calories)}
-          </Text>
+          <View style={styles.activityCircle}>
+            <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
+              {formatCount(calories)}
+            </Text>
+          </View>
+          <FlameOutline />
           <Text style={styles.meta}>Calories</Text>
         </View>
       </View>
-      <View style={styles.hourChart}>
-        {hourly.map((value, hour) => (
-          <View
-            key={hour}
-            style={[
-              styles.hourBar,
-              {
-                backgroundColor: value > 0 ? colors.accent : colors.line,
-                height: hourHeight(value, peak),
-              },
-            ]}
-          />
-        ))}
-      </View>
-      <View style={styles.scaleRow}>
-        <Text style={styles.scaleLabel}>12a</Text>
-        <Text style={styles.scaleLabel}>6a</Text>
-        <Text style={styles.scaleLabel}>12p</Text>
-        <Text style={styles.scaleLabel}>6p</Text>
-        <Text style={styles.scaleLabel}>12a</Text>
-      </View>
-      <Text style={styles.caption}>Hours in UTC</Text>
+    </View>
+  );
+}
+
+function ShoeOutline() {
+  return (
+    <View accessibilityLabel="Shoe" style={styles.shoe}>
+      <View style={styles.shoeHeel} />
+      <View style={styles.shoeUpper} />
+      <View style={styles.shoeToe} />
+      <View style={styles.shoeLace} />
+      <View style={styles.shoeSole} />
+    </View>
+  );
+}
+
+function FlameOutline() {
+  return (
+    <View accessibilityLabel="Flame" style={styles.flame}>
+      <View style={styles.flameOuter} />
+      <View style={styles.flameInner} />
     </View>
   );
 }
@@ -308,11 +310,6 @@ function formatCount(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
-function hourHeight(steps: number, peak: number): number {
-  if (steps <= 0 || peak <= 0) return 3;
-  return 4 + (steps / peak) * 48;
-}
-
 function seriesForChart(samples: HeartRateSample[]): number[] {
   const ordered = [...samples].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
   const today = ordered.filter((sample) => isSameUtcDay(sample.timestamp));
@@ -387,28 +384,123 @@ const styles = StyleSheet.create({
   activityRow: {
     flexDirection: 'row',
     gap: 16,
+    justifyContent: 'space-evenly',
   },
   activityStat: {
+    alignItems: 'center',
     flex: 1,
-    gap: 2,
+    gap: 6,
+  },
+  activityCircle: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    aspectRatio: 1,
+    backgroundColor: colors.bg,
+    borderColor: colors.accent,
+    borderRadius: 999,
+    borderWidth: 3,
+    justifyContent: 'center',
+    maxWidth: 148,
+    paddingHorizontal: 12,
+    width: '100%',
   },
   activityValue: {
     color: colors.text,
-    fontSize: 36,
+    fontSize: 28,
     fontVariant: ['tabular-nums'],
     fontWeight: '700',
+    textAlign: 'center',
   },
-  hourChart: {
-    alignItems: 'flex-end',
-    flexDirection: 'row',
-    gap: 2,
-    height: 56,
+  shoe: {
+    height: 40,
     marginTop: 4,
+    width: 76,
   },
-  hourBar: {
-    borderRadius: 2,
-    flex: 1,
-    minWidth: 2,
+  shoeHeel: {
+    borderBottomWidth: 0,
+    borderColor: colors.accent,
+    borderTopLeftRadius: 6,
+    borderTopRightRadius: 5,
+    borderWidth: 2,
+    height: 24,
+    position: 'absolute',
+    right: 6,
+    top: 6,
+    width: 16,
+  },
+  shoeUpper: {
+    borderBottomWidth: 0,
+    borderColor: colors.accent,
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 10,
+    borderWidth: 2,
+    height: 18,
+    left: 8,
+    position: 'absolute',
+    top: 12,
+    width: 58,
+  },
+  shoeToe: {
+    borderBottomLeftRadius: 8,
+    borderBottomWidth: 0,
+    borderColor: colors.accent,
+    borderRightWidth: 0,
+    borderTopLeftRadius: 12,
+    borderWidth: 2,
+    height: 16,
+    left: 2,
+    position: 'absolute',
+    top: 16,
+    width: 22,
+  },
+  shoeLace: {
+    backgroundColor: colors.accent,
+    height: 2,
+    left: 26,
+    position: 'absolute',
+    top: 18,
+    width: 14,
+  },
+  shoeSole: {
+    borderColor: colors.accent,
+    borderRadius: 5,
+    borderWidth: 2,
+    bottom: 2,
+    height: 8,
+    left: 0,
+    position: 'absolute',
+    width: 76,
+  },
+  flame: {
+    alignItems: 'center',
+    height: 40,
+    justifyContent: 'flex-end',
+    marginTop: 4,
+    width: 28,
+  },
+  flameOuter: {
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 10,
+    borderColor: '#ff8a3d',
+    borderTopLeftRadius: 12,
+    borderTopRightRadius: 14,
+    borderWidth: 2,
+    height: 28,
+    transform: [{ rotate: '8deg' }],
+    width: 18,
+  },
+  flameInner: {
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+    borderColor: '#ffb020',
+    borderTopLeftRadius: 8,
+    borderTopRightRadius: 6,
+    borderWidth: 2,
+    bottom: 6,
+    height: 14,
+    left: 10,
+    position: 'absolute',
+    width: 8,
   },
   scaleRow: {
     flexDirection: 'row',
@@ -538,7 +630,7 @@ const styles = StyleSheet.create({
     top: '80%',
   },
   stem: {
-    backgroundColor: '#0d120e',
+    backgroundColor: '#000000',
     borderRadius: 6,
     bottom: 8,
     left: 12,

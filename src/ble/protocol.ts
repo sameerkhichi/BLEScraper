@@ -11,8 +11,6 @@ export const CMD_READ_HEART_RATE = 21;
 export const CMD_STEPS = 67;
 export const CMD_START_REAL_TIME = 105;
 export const CMD_STOP_REAL_TIME = 106;
-// QRing answers a live heart-rate start with an empty 105 packet, then puts the BPM on command 30.
-export const CMD_REALTIME_HEART_RATE = 30;
 export const CMD_RAW_SENSOR = 0xa1;
 export const RAW_SENSOR_ENABLE = 0x04;
 // R09 and R12 turn the sensor lights off with 0x05. The older 0x02 stop leaves them flashing.
@@ -69,12 +67,14 @@ export function startRealtimePacket(readingType: number): Uint8Array {
   return makePacket(CMD_START_REAL_TIME, [readingType, ACTION_START]);
 }
 
-export function stopRealtimePacket(readingType: number): Uint8Array {
-  return makePacket(CMD_STOP_REAL_TIME, [readingType, 0, 0]);
+// QRing's manual heart-rate command is type 1 with a zero second byte.
+// Action 1 only produces an empty acknowledgement on this ring.
+export function startHeartRatePacket(): Uint8Array {
+  return makePacket(CMD_START_REAL_TIME, [REALTIME_HEART_RATE, 0]);
 }
 
-export function heartRatePollPacket(): Uint8Array {
-  return makePacket(CMD_REALTIME_HEART_RATE, [3]);
+export function stopRealtimePacket(readingType: number): Uint8Array {
+  return makePacket(CMD_STOP_REAL_TIME, [readingType, 0, 0]);
 }
 
 export function parseRealtime(packet: Uint8Array):
@@ -101,12 +101,6 @@ export function parseLiveHeartRate(packet: Uint8Array): number | null {
 
 export function isPlausibleHeartRate(value: number): boolean {
   return value >= 30 && value <= 220;
-}
-
-export function parsePolledHeartRate(packet: Uint8Array): number | null {
-  if (packet[0] !== CMD_REALTIME_HEART_RATE) return null;
-  const bpm = packet[1] ?? 0;
-  return isPlausibleHeartRate(bpm) ? bpm : null;
 }
 
 // Live heart-rate packets use byte 2 as a status. 1 with no BPM means the ring

@@ -67,10 +67,6 @@ export default function HomeScreen() {
       >
         <Card>
           <ActivityChart steps={lastPayload?.steps ?? []} />
-          <Button disabled={busy} label="Sync ring" onPress={syncRing} />
-          {settings.autoSync ? null : (
-            <Text style={styles.meta}>Automatic sync is off. Turn it on in Settings.</Text>
-          )}
         </Card>
 
         <Card>
@@ -189,6 +185,11 @@ export default function HomeScreen() {
           </Text>
           <Button label="API settings" onPress={() => router.push('/settings')} tone="secondary" />
         </Card>
+
+        <Button disabled={busy} label="Sync ring" onPress={syncRing} />
+        {settings.autoSync ? null : (
+          <Text style={styles.meta}>Automatic sync is off. Turn it on in Settings.</Text>
+        )}
 
         <Card>
           <Text style={styles.label}>Status</Text>

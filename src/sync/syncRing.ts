@@ -43,7 +43,7 @@ export async function collectRing(
 
   report(onStatus, 'Checking that the ring is being worn');
   const wear = await client.checkWorn();
-  if (!wear.wearing) {
+  if (!wear.wearing && wear.reportedOff) {
     report(onStatus, wear.reason);
     return {
       worn: false,
@@ -51,7 +51,8 @@ export async function collectRing(
       payload: readingPayload(ringId, ringName, { warnings: [wear.reason] }),
     };
   }
-  realtimeHeartRate = wear.bpm;
+  const knownHeartRate = wear.wearing ? wear.bpm : null;
+  realtimeHeartRate = knownHeartRate;
 
   if (plan.logs) {
     report(onStatus, 'Setting the ring clock');
@@ -77,8 +78,8 @@ export async function collectRing(
   }
 
   if (plan.vitals) {
-    const vitals = await readVitals(client, 'all', onStatus, wear.bpm);
-    realtimeHeartRate = vitals.realtimeHeartRate ?? wear.bpm;
+    const vitals = await readVitals(client, 'all', onStatus, knownHeartRate);
+    realtimeHeartRate = vitals.realtimeHeartRate ?? knownHeartRate;
     spo2 = vitals.spo2;
     bodyTemperatureC = vitals.bodyTemperatureC;
     warnings.push(...vitals.warnings);
@@ -156,7 +157,7 @@ export async function scanRing(
   const client = await openRing(ringId);
   report(onStatus, 'Checking that the ring is being worn');
   const wear = await client.checkWorn();
-  if (!wear.wearing) {
+  if (!wear.wearing && wear.reportedOff) {
     report(onStatus, wear.reason);
     return {
       worn: false,
@@ -164,7 +165,7 @@ export async function scanRing(
       payload: readingPayload(ringId, ringName, { warnings: [wear.reason] }),
     };
   }
-  const vitals = await readVitals(client, kind, onStatus, wear.bpm);
+  const vitals = await readVitals(client, kind, onStatus, wear.wearing ? wear.bpm : null);
   let battery = null;
   try {
     battery = await client.getBattery();
@@ -179,7 +180,7 @@ export async function scanRing(
     sleepLoaded: false,
     payload: readingPayload(ringId, ringName, {
       battery,
-      realtimeHeartRate: vitals.realtimeHeartRate ?? wear.bpm,
+      realtimeHeartRate: vitals.realtimeHeartRate ?? (wear.wearing ? wear.bpm : null),
       spo2: vitals.spo2,
       bodyTemperatureC: vitals.bodyTemperatureC,
       warnings: vitals.warnings,
