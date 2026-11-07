@@ -67,7 +67,7 @@ export function ActivityChart({ steps }: { steps: StepSample[] }) {
   let stepTotal = 0;
   let calories = 0;
   for (const sample of steps) {
-    if (!isSameUtcDay(sample.timestamp)) continue;
+    if (!isSameLocalDay(sample.timestamp)) continue;
     stepTotal += sample.steps;
     calories += sample.calories;
   }
@@ -278,12 +278,12 @@ function qualityColor(label: string): string {
   return colors.danger;
 }
 
-function isSameUtcDay(timestamp: string, now = new Date()): boolean {
+function isSameLocalDay(timestamp: string, now = new Date()): boolean {
   const date = new Date(timestamp);
   return (
-    date.getUTCFullYear() === now.getUTCFullYear() &&
-    date.getUTCMonth() === now.getUTCMonth() &&
-    date.getUTCDate() === now.getUTCDate()
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate()
   );
 }
 

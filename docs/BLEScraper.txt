@@ -42,6 +42,22 @@ The phone already merges heart rate and steps by timestamp, so the saved reading
 
 A month-long cache is not worth it. The ring cannot resend anything older than about a week, so a month of keys does not make the filter safer. If Solloid appends rows, send only timestamps that were not in the last successful upload, and remember those timestamps for about 10 days. If Solloid replaces a row by timestamp, the full snapshot is fine and the phone does not need a second cache.
 
+Two-day last reading
+
+The Last reading Steps number is two days because, while the app is open, every log read asks the ring for two days. It is not a pile of readings that have not been sent yet.
+
+While the phone is disconnected, the ring keeps its own history. Steps are stored in 15-minute blocks. Heart rate is stored about every 5 minutes. The ring does not send those blocks on its own. They stay on the ring until the phone connects and asks.
+
+On a log sync, about every 15 minutes or when Sync ring is tapped, the phone connects, sets the ring clock to UTC, and requests the stored logs. Steps are yesterday (day offset 1) and today (day offset 0). Heart rate is the log for those same two days. The ring replies with the blocks it has stored. The phone saves that reply as the last reading and disconnects. Days older than yesterday can still sit on the ring. This open-app read does not ask for them.
+
+Last reading Steps adds every step block in that reply, so the number is yesterday plus today. The Today card does not. It keeps the blocks that fall on the phone's local calendar day. A successful upload does not drop yesterday from the next read. The next open-app sync asks for two days again.
+
+A background wake, described above, asks for about 7 days instead. The phone also keeps earlier step and heart-rate samples by timestamp, so after a wake the Last reading total can cover more than the two days an open-app sync just requested. The ring still returns nothing older than about a week.
+
+Sending to the Arduino IP
+
+The last reading and the upload queue are different. After a read, the phone compares the new payload with the previous one. If something changed, the whole payload is added to a queue stored on the phone. About once an hour, and when Send waiting readings is tapped, the app POSTs each queued body as JSON to the API URL in Settings. Sync ring sends that queue right away. That URL is the Arduino, reached through the home network and port forwarding, for example http://203.0.113.10:8080/ingest. An optional key is sent as the X-Api-Key header. If the phone cannot reach that address, the queued readings stay on the phone and are tried again later. Sending or keeping that queue does not change what the ring returns on the next read.
+
 Sleep upload
 
 Sync posts one JSON body to the API URL (HTTP or the port-forwarded Arduino IP). Content-Type is application/json. A live sensor reading uses the same shape and sends "sleep": [].

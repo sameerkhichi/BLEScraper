@@ -250,7 +250,7 @@ export default function HomeScreen() {
           <Text style={styles.meta}>
             {lastPayload ? `Updated ${new Date(lastPayload.syncedAt).toLocaleString()}` : 'No reading yet.'}
           </Text>
-          <Text style={styles.meta}>Clock and history use UTC.</Text>
+          <Text style={styles.meta}>Stored samples use UTC. Today follows the phone clock.</Text>
         </Card>
 
         <Card>
