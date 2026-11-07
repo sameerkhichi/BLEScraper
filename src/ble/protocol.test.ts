@@ -17,6 +17,8 @@ import {
   classifyWear,
   parseLiveHeartRate,
   parseRawSensor,
+  recognizeHandGestures,
+  recognizeRingGesture,
   ringTilt,
   startHeartRatePacket,
   continueHeartRatePacket,
@@ -201,6 +203,37 @@ test('tilt follows the finger and stays put when the ring is turned over', () =>
   assert.deepEqual(ringTilt({ x: 0, y: 0, z: -1 }), { alongDeg: 0, acrossDeg: 0 });
   assert.deepEqual(ringTilt({ x: 0.5, y: 0, z: Math.sqrt(3) / 2 }), { alongDeg: 30, acrossDeg: 0 });
   assert.deepEqual(ringTilt({ x: 0, y: -1, z: 0 }), { alongDeg: 0, acrossDeg: -90 });
+});
+
+test('ring gestures light up the matching pose and a hard move wins', () => {
+  assert.equal(recognizeRingGesture({ x: 0, y: 0, z: 1 }, null), 'level');
+  assert.equal(recognizeRingGesture({ x: 0.5, y: 0, z: Math.sqrt(3) / 2 }, null), 'fingertip-up');
+  assert.equal(recognizeRingGesture({ x: -0.7, y: 0, z: 0.7 }, null), 'fingertip-down');
+  assert.equal(recognizeRingGesture({ x: 0, y: -1, z: 0 }, null), 'tilt-left');
+  assert.equal(recognizeRingGesture({ x: 0, y: 0.7, z: 0.7 }, null), 'tilt-right');
+  assert.equal(recognizeRingGesture({ x: 0, y: 0, z: -1 }, null), 'flip');
+  assert.equal(recognizeRingGesture({ x: 0, y: 0, z: 1.8 }, { x: 0, y: 0, z: 1 }), 'shake');
+  assert.equal(recognizeRingGesture({ x: 0.32, y: 0, z: 0.95 }, null), null);
+});
+
+test('hand gestures match a wave, a beckon, a held thumb, and a V', () => {
+  const wave = [0.6, -0.6, 0.6, -0.6].map((y) => ({ x: 0, y, z: 0.8 }));
+  assert.deepEqual(recognizeHandGestures(wave), ['wave']);
+
+  const beckon = [0.45, -0.45, 0.5, -0.5].map((x) => ({ x, y: 0.05, z: 0.8 }));
+  assert.deepEqual(recognizeHandGestures(beckon), ['come-here']);
+
+  const thumb = { x: 0.05, y: 0.9, z: 0.35 };
+  assert.deepEqual(recognizeHandGestures([thumb, thumb]), ['thumbs-up']);
+  const down = { x: 0.05, y: -0.9, z: 0.35 };
+  assert.deepEqual(recognizeHandGestures([down, down]), ['thumbs-down']);
+
+  const peace = [
+    { x: 0.7, y: -0.45, z: 0.5 },
+    { x: 0.75, y: 0.05, z: 0.5 },
+    { x: 0.7, y: 0.45, z: 0.5 },
+  ];
+  assert.deepEqual(recognizeHandGestures(peace), ['peace']);
 });
 
 test('QRing names such as COLMI_CA02 count as the ring', () => {

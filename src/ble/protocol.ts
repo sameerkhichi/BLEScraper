@@ -5,6 +5,11 @@ export const UART_SERVICE_UUID = '6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E';
 export const UART_RX_UUID = '6E400002-B5A3-F393-E0A9-E50E24DCCA9E';
 export const UART_TX_UUID = '6E400003-B5A3-F393-E0A9-E50E24DCCA9E';
 
+export const CMD_GESTURE = 2;
+export const GESTURE_ENABLE = 4;
+export const GESTURE_ARM = 5;
+export const GESTURE_DISABLE = 6;
+export const GESTURE_WAVE = 2;
 export const CMD_SET_TIME = 1;
 export const CMD_BATTERY = 3;
 export const CMD_READ_HEART_RATE = 21;
@@ -146,10 +151,15 @@ export function rawSensorPacket(action: number): Uint8Array {
   return makePacket(CMD_RAW_SENSOR, [action]);
 }
 
+export function gesturePacket(action: number): Uint8Array {
+  return makePacket(CMD_GESTURE, [action]);
+}
+
 export type RawSensorFrame =
   | { kind: 'accelerometer'; reading: AccelReading }
   | { kind: 'ppg'; value: number; max: number; min: number; diff: number }
-  | { kind: 'optical'; value: number };
+  | { kind: 'optical'; value: number }
+  | { kind: 'wave' };
 
 export function parseRawSensor(packet: Uint8Array): RawSensorFrame | null {
   if (packet[0] !== CMD_RAW_SENSOR) return null;
@@ -189,6 +199,99 @@ export function ringTilt(reading: AccelReading): { alongDeg: number; acrossDeg: 
   const along = (Math.atan2(reading.x, Math.hypot(reading.y, reading.z)) * 180) / Math.PI;
   const across = (Math.atan2(reading.y, Math.hypot(reading.x, reading.z)) * 180) / Math.PI;
   return { alongDeg: Math.round(along), acrossDeg: Math.round(across) };
+}
+
+export const RING_GESTURES = [
+  { id: 'level', label: 'Level' },
+  { id: 'fingertip-up', label: 'Tip up' },
+  { id: 'fingertip-down', label: 'Tip down' },
+  { id: 'tilt-left', label: 'Left' },
+  { id: 'tilt-right', label: 'Right' },
+  { id: 'flip', label: 'Flip' },
+  { id: 'shake', label: 'Shake' },
+] as const;
+
+export type RingGesture = (typeof RING_GESTURES)[number]['id'];
+
+const TILT_DEGREES = 28;
+const LEVEL_DEGREES = 12;
+
+export function recognizeRingGesture(reading: AccelReading, previous: AccelReading | null): RingGesture | null {
+  const magnitude = Math.hypot(reading.x, reading.y, reading.z);
+  const previousMagnitude = previous ? Math.hypot(previous.x, previous.y, previous.z) : magnitude;
+  if (Math.abs(magnitude - 1) > 0.45 || Math.abs(magnitude - previousMagnitude) > 0.35) return 'shake';
+
+  const { alongDeg, acrossDeg } = ringTilt(reading);
+  if (reading.z < -0.55 && Math.abs(alongDeg) < 35 && Math.abs(acrossDeg) < 35) return 'flip';
+  if (Math.abs(alongDeg) >= TILT_DEGREES && Math.abs(alongDeg) >= Math.abs(acrossDeg)) {
+    return alongDeg > 0 ? 'fingertip-up' : 'fingertip-down';
+  }
+  if (acrossDeg >= TILT_DEGREES) return 'tilt-right';
+  if (acrossDeg <= -TILT_DEGREES) return 'tilt-left';
+  if (reading.z > 0.65 && Math.abs(alongDeg) <= LEVEL_DEGREES && Math.abs(acrossDeg) <= LEVEL_DEGREES) {
+    return 'level';
+  }
+  return null;
+}
+
+export const HAND_GESTURES = [
+  { id: 'wave', label: 'Wave' },
+  { id: 'come-here', label: 'Come here' },
+  { id: 'thumbs-up', label: 'Thumbs up' },
+  { id: 'thumbs-down', label: 'Thumbs down' },
+  { id: 'peace', label: 'Peace' },
+] as const;
+
+export type HandGesture = (typeof HAND_GESTURES)[number]['id'];
+
+export function recognizeHandGestures(samples: AccelReading[]): HandGesture[] {
+  if (samples.length < 2) return [];
+  const recent = samples.slice(-8);
+  const xs = recent.map((sample) => sample.x);
+  const ys = recent.map((sample) => sample.y);
+  const yChanges = signChanges(ys, 0.22);
+  const xChanges = signChanges(xs, 0.22);
+  const ySpan = span(ys);
+  const xSpan = span(xs);
+  const found: HandGesture[] = [];
+
+  if (yChanges >= 3 && ySpan >= 0.7) found.push('wave');
+  if (xChanges >= 2 && xSpan >= 0.55 && ySpan < 0.55) found.push('come-here');
+
+  const last = recent[recent.length - 1];
+  const prior = recent[recent.length - 2];
+  const lastTilt = ringTilt(last);
+  const priorTilt = ringTilt(prior);
+  const held =
+    Math.abs(last.x - prior.x) < 0.2 &&
+    Math.abs(last.y - prior.y) < 0.2 &&
+    Math.abs(last.z - prior.z) < 0.2;
+  if (held && lastTilt.acrossDeg >= 50 && priorTilt.acrossDeg >= 45 && Math.abs(lastTilt.alongDeg) < 35) {
+    found.push('thumbs-up');
+  }
+  if (held && lastTilt.acrossDeg <= -50 && priorTilt.acrossDeg <= -45 && Math.abs(lastTilt.alongDeg) < 35) {
+    found.push('thumbs-down');
+  }
+
+  const raised = recent.filter((sample) => ringTilt(sample).alongDeg >= 30).length >= Math.min(3, recent.length);
+  if (!found.includes('wave') && raised && yChanges === 1 && ySpan >= 0.45 && xSpan < 0.8) found.push('peace');
+
+  return found;
+}
+
+function signChanges(values: number[], deadband: number): number {
+  const signs: number[] = [];
+  for (const value of values) {
+    if (Math.abs(value) < deadband) continue;
+    const sign = value > 0 ? 1 : -1;
+    if (signs[signs.length - 1] !== sign) signs.push(sign);
+  }
+  return Math.max(0, signs.length - 1);
+}
+
+function span(values: number[]): number {
+  if (values.length === 0) return 0;
+  return Math.max(...values) - Math.min(...values);
 }
 
 export class HeartRateLogParser {

@@ -3,9 +3,18 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { openRing } from '../ble/ringClient';
-import { ringTilt, type RawSensorFrame } from '../ble/protocol';
+import {
+  HAND_GESTURES,
+  RING_GESTURES,
+  recognizeHandGestures,
+  recognizeRingGesture,
+  ringTilt,
+  type HandGesture,
+  type RawSensorFrame,
+  type RingGesture,
+} from '../ble/protocol';
 import { Button, Card, colors } from '../components/ui';
-import type { AccelSample } from '../model';
+import type { AccelReading, AccelSample } from '../model';
 import { pauseAutoSync } from '../sync/ringGate';
 import { useAppState } from '../state/AppProvider';
 
@@ -25,7 +34,12 @@ export default function MotionScreen() {
   const [ppg, setPpg] = useState<number | null>(null);
   const [optical, setOptical] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [gesture, setGesture] = useState<RingGesture | null>(null);
+  const [hands, setHands] = useState<HandGesture[]>([]);
   const stopRef = useRef<(() => void) | null>(null);
+  const previousAccel = useRef<AccelSample | null>(null);
+  const accelWindow = useRef<AccelReading[]>([]);
+  const handUntil = useRef(new Map<HandGesture, number>());
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -45,6 +59,11 @@ export default function MotionScreen() {
     }
     const ringId = settings.ringId;
     setError(null);
+    setGesture(null);
+    setHands([]);
+    previousAccel.current = null;
+    accelWindow.current = [];
+    handUntil.current.clear();
     setPhase('connecting');
     const session = { cancel: false, stop: null as (() => void) | null };
     stopRef.current = () => {
@@ -60,6 +79,21 @@ export default function MotionScreen() {
         if (mounted.current) setPhase('live');
         await client.watchMotion((frame) => {
           if (!mounted.current) return;
+          if (frame.kind === 'wave') {
+            noteHand('wave', handUntil.current);
+            setHands(activeHands(handUntil.current));
+            return;
+          }
+          if (frame.kind === 'accelerometer') {
+            const next = toSample(frame.reading);
+            const window = accelWindow.current;
+            window.push(next);
+            if (window.length > 8) window.shift();
+            for (const hand of recognizeHandGestures(window)) noteHand(hand, handUntil.current);
+            setHands(activeHands(handUntil.current));
+            setGesture(recognizeRingGesture(next, previousAccel.current));
+            previousAccel.current = next;
+          }
           applyFrame(frame, setSample, setHistory, setPpg, setOptical);
         });
       });
@@ -76,11 +110,12 @@ export default function MotionScreen() {
   const live = phase !== 'idle';
 
   return (
-    <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
+    <View style={styles.screen}>
+    <ScrollView contentContainerStyle={styles.content} style={styles.scroll}>
       <Text style={styles.body}>
-        The circle is the ring, fingertip at the top. The dot rolls toward whichever side you lower. The bars are
-        the three sensor directions in g, and the strip at the bottom is shake, not tilt. The red and green
-        lights flash while this runs and turn off when you stop.
+        The circle is the ring, fingertip at the top. The dot rolls toward whichever side you lower. Wave the hand,
+        curl the finger in twice for come here, hold the right or left side up for a thumb, or trace a V with the
+        fingertip for peace. The pose chips stay too. The red and green lights turn off when you stop.
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Card>
@@ -122,7 +157,45 @@ export default function MotionScreen() {
         tone="secondary"
       />
     </ScrollView>
+    <View style={styles.gestureBar}>
+      <View style={styles.gestureRow}>
+        {[...HAND_GESTURES, ...RING_GESTURES].map((item) => {
+          const lit = hands.includes(item.id as HandGesture) || gesture === item.id;
+          return (
+            <View key={item.id} style={[styles.chip, lit && styles.chipLit]}>
+              <Text style={[styles.chipLabel, lit && styles.chipLabelLit]}>{item.label}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+    </View>
   );
+}
+
+const HAND_HOLD_MS = 3000;
+
+function noteHand(hand: HandGesture, until: Map<HandGesture, number>): void {
+  until.set(hand, Date.now() + HAND_HOLD_MS);
+}
+
+function activeHands(until: Map<HandGesture, number>): HandGesture[] {
+  const now = Date.now();
+  const active: HandGesture[] = [];
+  for (const [hand, expires] of until) {
+    if (expires > now) active.push(hand);
+    else until.delete(hand);
+  }
+  return active;
+}
+
+function toSample(reading: AccelReading): AccelSample {
+  return {
+    x: round3(reading.x),
+    y: round3(reading.y),
+    z: round3(reading.z),
+    sampledAt: new Date().toISOString(),
+  };
 }
 
 function applyFrame(
@@ -244,6 +317,9 @@ function Sparkline({ values }: { values: number[] }) {
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.bg,
+    flex: 1,
+  },
+  scroll: {
     flex: 1,
   },
   content: {
@@ -378,5 +454,37 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     borderRadius: 2,
     flex: 1,
+  },
+  gestureBar: {
+    borderTopColor: colors.line,
+    borderTopWidth: 1,
+    paddingBottom: 20,
+    paddingHorizontal: 20,
+    paddingTop: 12,
+  },
+  gestureRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  chip: {
+    backgroundColor: colors.card,
+    borderColor: colors.line,
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  chipLit: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  chipLabel: {
+    color: colors.muted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chipLabelLit: {
+    color: colors.accentText,
   },
 });

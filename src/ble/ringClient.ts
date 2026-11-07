@@ -8,6 +8,7 @@ import { isValidPacket } from './packet';
 import type { RawSensorFrame } from './protocol';
 import {
   CMD_BATTERY,
+  CMD_GESTURE,
   CMD_RAW_SENSOR,
   CMD_READ_HEART_RATE,
   CMD_SET_TIME,
@@ -23,6 +24,10 @@ import {
   UART_RX_UUID,
   UART_SERVICE_UUID,
   UART_TX_UUID,
+  GESTURE_ARM,
+  GESTURE_DISABLE,
+  GESTURE_ENABLE,
+  GESTURE_WAVE,
   batteryPacket,
   bodyTemperatureCelsius,
   classifyWear,
@@ -30,6 +35,7 @@ import {
   isPlausibleSpo2,
   parseBattery,
   parseLiveHeartRate,
+  gesturePacket,
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
@@ -320,6 +326,7 @@ export class RingClient {
             settled = true;
             this.motionStop = null;
             this.listeners.delete(CMD_RAW_SENSOR);
+            this.listeners.delete(CMD_GESTURE);
             this.aborts.delete(abort);
             resolve();
           };
@@ -328,6 +335,7 @@ export class RingClient {
             settled = true;
             this.motionStop = null;
             this.listeners.delete(CMD_RAW_SENSOR);
+            this.listeners.delete(CMD_GESTURE);
             this.aborts.delete(abort);
             reject(error);
           };
@@ -337,7 +345,13 @@ export class RingClient {
             const frame = parseRawSensor(packet);
             if (frame) onFrame(frame);
           });
-          this.send(rawSensorPacket(RAW_SENSOR_ENABLE)).catch(abort);
+          this.listeners.set(CMD_GESTURE, (packet) => {
+            if (packet[1] === GESTURE_WAVE) onFrame({ kind: 'wave' });
+          });
+          this.send(rawSensorPacket(RAW_SENSOR_ENABLE))
+            .then(() => this.send(gesturePacket(GESTURE_ENABLE)).catch(() => undefined))
+            .then(() => this.send(gesturePacket(GESTURE_ARM)).catch(() => undefined))
+            .catch(abort);
         });
       } finally {
         await this.stopRawSensors();
@@ -428,6 +442,11 @@ export class RingClient {
   }
 
   private async stopRawSensors(): Promise<void> {
+    try {
+      await this.send(gesturePacket(GESTURE_DISABLE));
+    } catch {
+      // The wave detector may already be off.
+    }
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await this.send(rawSensorPacket(RAW_SENSOR_DISABLE));
