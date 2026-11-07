@@ -15,7 +15,9 @@ import {
   bodyTemperatureCelsius,
   parseBattery,
   classifyWear,
+  heartRatePollPacket,
   parseLiveHeartRate,
+  parsePolledHeartRate,
   parseRawSensor,
   parseRealtime,
   RAW_SENSOR_DISABLE,
@@ -138,6 +140,16 @@ test('live heart rate accepts the BPM wherever this ring places it', () => {
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 6, 0, 68)), 68);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 1, 2, 0)), null);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 3, 0, 98)), null);
+});
+
+test('a heart-rate poll carries the BPM in its own packet', () => {
+  const packet = heartRatePollPacket();
+  assert.equal(packet[0], 30);
+  assert.equal(packet[1], 3);
+  assert.equal(isValidPacket(packet), true);
+  assert.equal(parsePolledHeartRate(Uint8Array.of(30, 72, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 102)), 72);
+  assert.equal(parsePolledHeartRate(Uint8Array.of(30, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 30)), null);
+  assert.equal(parsePolledHeartRate(Uint8Array.of(105, 1, 0, 72)), null);
 });
 
 test('a heart-rate packet says whether the ring is being worn', () => {

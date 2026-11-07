@@ -205,7 +205,7 @@ async function readVitals(
   if (wantHeart) {
     if (knownHeartRate !== null) {
       realtimeHeartRate = knownHeartRate;
-      debugLog(`Live heart rate ${knownHeartRate}`);
+      report(onStatus, `Heart rate ${knownHeartRate}`);
     } else {
       report(onStatus, 'Measuring heart rate');
       try {

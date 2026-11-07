@@ -10,6 +10,7 @@ import {
   CMD_BATTERY,
   CMD_RAW_SENSOR,
   CMD_READ_HEART_RATE,
+  CMD_REALTIME_HEART_RATE,
   CMD_SET_TIME,
   CMD_START_REAL_TIME,
   CMD_STEPS,
@@ -26,9 +27,11 @@ import {
   batteryPacket,
   bodyTemperatureCelsius,
   classifyWear,
+  heartRatePollPacket,
   isPlausibleSpo2,
   parseBattery,
   parseLiveHeartRate,
+  parsePolledHeartRate,
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
@@ -50,7 +53,8 @@ import {
 const HISTORY_TIMEOUT_MS = 15000;
 const SHORT_TIMEOUT_MS = 5000;
 const HEART_RATE_TIMEOUT_MS = 35000;
-const WEAR_PROBE_MS = 18000;
+// The same window as a measurement. An explicit off-finger packet still ends the probe early.
+const WEAR_PROBE_MS = HEART_RATE_TIMEOUT_MS;
 
 export const NOT_WORN_MESSAGE = 'Ring is not being worn. Leaving it asleep.';
 
@@ -352,8 +356,34 @@ export class RingClient {
   private async probeWear(
     timeoutMs: number,
   ): Promise<{ wearing: true; bpm: number } | { wearing: false; reason: string }> {
+    const reading = await this.readLiveHeartRate(timeoutMs);
+    if (reading.bpm !== null) {
+      debugLog(`Ring is being worn. Heart rate ${reading.bpm}`);
+      return { wearing: true, bpm: reading.bpm };
+    }
+    debugLog(
+      reading.reportedOff
+        ? 'Ring reported that it is not being worn.'
+        : 'No heart-rate reading. Treating the ring as unworn.',
+    );
+    return { wearing: false, reason: NOT_WORN_MESSAGE };
+  }
+
+  private async collectHeartRate(timeoutMs: number): Promise<number | null> {
+    const reading = await this.readLiveHeartRate(timeoutMs);
+    return reading.bpm;
+  }
+
+  private async readLiveHeartRate(timeoutMs: number): Promise<{ bpm: number | null; reportedOff: boolean }> {
     let bpm: number | null = null;
     let reportedOff = false;
+    let lastPacket: Uint8Array | null = null;
+    let asked = false;
+
+    const forget = () => {
+      this.listeners.delete(CMD_START_REAL_TIME);
+      this.listeners.delete(CMD_REALTIME_HEART_RATE);
+    };
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -365,12 +395,21 @@ export class RingClient {
           offTimer = null;
         };
         const timer = setTimeout(() => complete(), timeoutMs);
+        const poll = setInterval(() => {
+          if (settled) return;
+          if (!asked) {
+            asked = true;
+            debugLog('Asking the ring for the heart-rate sample');
+          }
+          this.send(heartRatePollPacket()).catch(() => undefined);
+        }, 1000);
         const complete = () => {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          clearInterval(poll);
           clearOff();
-          this.listeners.delete(CMD_START_REAL_TIME);
+          forget();
           this.aborts.delete(abort);
           resolve();
         };
@@ -378,20 +417,29 @@ export class RingClient {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
+          clearInterval(poll);
           clearOff();
-          this.listeners.delete(CMD_START_REAL_TIME);
+          forget();
           this.aborts.delete(abort);
           reject(error);
         };
         this.aborts.add(abort);
+
+        const accept = (value: number | null) => {
+          if (value === null) return;
+          clearOff();
+          bpm = value;
+          complete();
+        };
+
         this.listeners.set(CMD_START_REAL_TIME, (packet) => {
-          const wear = classifyWear(packet);
-          if (wear === 'worn') {
-            clearOff();
-            bpm = parseLiveHeartRate(packet);
-            complete();
+          lastPacket = packet;
+          const value = parseLiveHeartRate(packet);
+          if (value !== null) {
+            accept(value);
             return;
           }
+          const wear = classifyWear(packet);
           if (wear === 'pending') {
             clearOff();
             return;
@@ -405,6 +453,10 @@ export class RingClient {
           }
           if (!offTimer) offTimer = setTimeout(() => complete(), 3000);
         });
+        this.listeners.set(CMD_REALTIME_HEART_RATE, (packet) => {
+          lastPacket = packet;
+          accept(parsePolledHeartRate(packet));
+        });
         this.send(startRealtimePacket(REALTIME_HEART_RATE)).catch(abort);
       });
     } finally {
@@ -415,64 +467,14 @@ export class RingClient {
       }
     }
 
-    if (bpm !== null) {
-      debugLog(`Ring is being worn. Heart rate ${bpm}`);
-      return { wearing: true, bpm };
-    }
-    debugLog(reportedOff ? 'Ring reported that it is not being worn.' : 'No heart-rate reading. Treating the ring as unworn.');
-    return { wearing: false, reason: NOT_WORN_MESSAGE };
-  }
-
-  private async collectHeartRate(timeoutMs: number): Promise<number | null> {
-    const readings: number[] = [];
-    let lastPacket: Uint8Array | null = null;
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        let settled = false;
-        const timer = setTimeout(() => complete(), timeoutMs);
-        const complete = () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          this.listeners.delete(CMD_START_REAL_TIME);
-          this.aborts.delete(abort);
-          resolve();
-        };
-        const abort = (error: Error) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          this.listeners.delete(CMD_START_REAL_TIME);
-          this.aborts.delete(abort);
-          reject(error);
-        };
-        this.aborts.add(abort);
-        this.listeners.set(CMD_START_REAL_TIME, (packet) => {
-          lastPacket = packet;
-          const bpm = parseLiveHeartRate(packet);
-          if (bpm === null) return;
-          readings.push(bpm);
-          complete();
-        });
-        this.send(startRealtimePacket(REALTIME_HEART_RATE)).catch(abort);
-      });
-    } finally {
-      try {
-        await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
-      } catch {
-        // A reading is still usable when the stop command fails.
-      }
-    }
-
-    if (readings.length === 0) {
+    if (bpm === null) {
       debugLog(
         lastPacket
           ? `Heart-rate packet ${toHex(lastPacket)} was not a reading.`
           : 'No heart-rate packet arrived.',
       );
     }
-    return readings.length === 0 ? null : readings[readings.length - 1];
+    return { bpm, reportedOff };
   }
 
   private async collectRealtime(
