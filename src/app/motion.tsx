@@ -79,7 +79,8 @@ export default function MotionScreen() {
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
       <Text style={styles.body}>
         X runs along the finger, Y around the band, and Z through the ring. At rest the total stays near 1 g.
-        Move the ring and the dot and bars follow. PPG and optical counts update from the same stream.
+        The red and green lights flash while this runs, because those sensors share the stream with the
+        accelerometer. They turn off when you stop.
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Card>

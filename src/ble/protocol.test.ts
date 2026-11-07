@@ -17,6 +17,7 @@ import {
   parseLiveHeartRate,
   parseRawSensor,
   parseRealtime,
+  RAW_SENSOR_DISABLE,
   rawSensorPacket,
   REALTIME_TEMPERATURE,
   setTimePacket,
@@ -160,6 +161,7 @@ test('raw accelerometer packet decodes 12-bit axes in g', () => {
   const ppg = parseRawSensor(Uint8Array.of(161, 2, 50, 94, 50, 118, 49, 30, 1, 88, 1, 0, 0, 0, 0, 132));
   assert.deepEqual(ppg, { kind: 'ppg', value: 12894, max: 12918, min: 12574, diff: 344 });
   assert.equal(rawSensorPacket(0x04)[1], 0x04);
+  assert.equal(rawSensorPacket(RAW_SENSOR_DISABLE)[1], 0x05);
 });
 
 test('QRing names such as COLMI_CA02 count as the ring', () => {

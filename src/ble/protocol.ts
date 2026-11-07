@@ -13,7 +13,8 @@ export const CMD_START_REAL_TIME = 105;
 export const CMD_STOP_REAL_TIME = 106;
 export const CMD_RAW_SENSOR = 0xa1;
 export const RAW_SENSOR_ENABLE = 0x04;
-export const RAW_SENSOR_DISABLE = 0x02;
+// R09 and R12 turn the sensor lights off with 0x05. The older 0x02 stop leaves them flashing.
+export const RAW_SENSOR_DISABLE = 0x05;
 export const REALTIME_HEART_RATE = 1;
 export const REALTIME_SPO2 = 3;
 export const REALTIME_HEART_RATE_STREAM = 6;

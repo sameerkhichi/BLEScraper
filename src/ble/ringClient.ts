@@ -319,17 +319,26 @@ export class RingClient {
           this.send(rawSensorPacket(RAW_SENSOR_ENABLE)).catch(abort);
         });
       } finally {
-        try {
-          await this.send(rawSensorPacket(RAW_SENSOR_DISABLE));
-        } catch {
-          // The stream has already ended.
-        }
+        await this.stopRawSensors();
       }
     });
   }
 
   stopMotion(): void {
     this.motionStop?.();
+  }
+
+  private async stopRawSensors(): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.send(rawSensorPacket(RAW_SENSOR_DISABLE));
+        debugLog('Asked the ring to turn the sensor lights off');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'stop failed';
+        debugLog(`Could not turn the sensor lights off: ${message}`);
+      }
+      if (attempt === 0) await delay(200);
+    }
   }
 
   private async collectHeartRate(timeoutMs: number): Promise<number | null> {
