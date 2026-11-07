@@ -42,7 +42,6 @@ import {
   readHeartRatePacket,
   readStepsPacket,
   setTimePacket,
-  smoothHeartRate,
   startHeartRatePacket,
   startRealtimePacket,
   stopRealtimePacket,
@@ -61,8 +60,6 @@ const SHORT_TIMEOUT_MS = 5000;
 const HEART_RATE_TIMEOUT_MS = 35000;
 // Long enough to see an off-finger packet. The heart-rate measurement waits on its own.
 const WEAR_PROBE_MS = 8000;
-// About as often as this ring can compute a new pulse. Faster requests restart the sensor.
-const HEART_RATE_POLL_MS = 1000;
 
 export const NOT_WORN_MESSAGE = 'Ring is not being worn. Leaving it asleep.';
 
@@ -398,33 +395,32 @@ export class RingClient {
           this.aborts.add(abort);
           this.heartStop = finish;
           let lastSampleAt = 0;
-          const recent: number[] = [];
+          let sawBpm = false;
           this.listeners.set(CMD_START_REAL_TIME, (packet) => {
             const bpm = parseLiveHeartRate(packet);
             if (bpm !== null) {
               clearOff();
               lastSampleAt = Date.now();
-              recent.push(bpm);
-              if (recent.length > 3) recent.shift();
-              const steady = smoothHeartRate(recent);
+              sawBpm = true;
               debugLog(`Heart rate ${bpm}`);
-              if (steady !== null) onFrame({ kind: 'bpm', bpm: steady });
+              onFrame({ kind: 'bpm', bpm });
               return;
             }
             if (classifyWear(packet) !== 'off') {
               clearOff();
               return;
             }
-            // One status packet between samples is not the ring coming off the finger.
-            if (!offTimer) offTimer = setTimeout(() => abort(new Error(NOT_WORN_MESSAGE)), 3000);
+            // A status packet between pulses is normal once the trace has started.
+            const quietMs = sawBpm ? 8000 : 3000;
+            if (!offTimer) offTimer = setTimeout(() => abort(new Error(NOT_WORN_MESSAGE)), quietMs);
           });
-          const ask = () => {
+          this.send(startHeartRatePacket()).catch(abort);
+          // Continue only after the stream goes quiet. Another start resets the sensor and repeats the first number.
+          poll = setInterval(() => {
             if (settled) return;
-            const fresh = lastSampleAt === 0 || Date.now() - lastSampleAt > 4000;
-            this.send(fresh ? startHeartRatePacket() : continueHeartRatePacket()).catch(() => undefined);
-          };
-          ask();
-          poll = setInterval(ask, HEART_RATE_POLL_MS);
+            if (lastSampleAt !== 0 && Date.now() - lastSampleAt < 2000) return;
+            this.send(continueHeartRatePacket()).catch(() => undefined);
+          }, 2000);
         });
       } finally {
         if (poll) clearInterval(poll);

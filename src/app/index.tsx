@@ -82,6 +82,7 @@ export default function HomeScreen() {
     const ringId = settings.ringId;
     setHeartError(null);
     setBeats([]);
+    setLiveBpm(null);
     setHeartAt(null);
     setHeartPhase('connecting');
     bpmRef.current = null;
@@ -140,12 +141,12 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.label}>Heart rate</Text>
           <HeartRateChart
-            bpm={liveBpm ?? lastPayload?.realtimeHeartRate ?? null}
+            bpm={heartPhase === 'idle' ? (liveBpm ?? lastPayload?.realtimeHeartRate ?? null) : liveBpm}
             live={heartPhase === 'live'}
             points={
-              beats.length > 0
-                ? beats
-                : (lastPayload?.heartRate ?? []).slice(-BEAT_POINTS).map((sample) => sample.bpm)
+              heartPhase === 'idle' && beats.length === 0
+                ? (lastPayload?.heartRate ?? []).slice(-BEAT_POINTS).map((sample) => sample.bpm)
+                : beats
             }
           />
           {heartPhase === 'live' && heartAt ? (

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import type { SleepNight, SleepStageName, StepSample } from '../model';
@@ -119,7 +119,7 @@ export function HeartRateChart({
         </View>
       </View>
       {points.length === 0 ? (
-        <Text style={styles.meta}>Measure to draw your heart rate.</Text>
+        <Text style={styles.meta}>{live ? 'Waiting for the next beat.' : 'Measure to draw your heart rate.'}</Text>
       ) : (
         <BpmLine points={points} />
       )}
@@ -174,55 +174,20 @@ function PulsingHeart({ bpm }: { bpm: number | null }) {
 }
 
 function BpmLine({ points }: { points: number[] }) {
-  const [width, setWidth] = useState(0);
   const low = Math.min(...points);
   const high = Math.max(...points);
-  const floor = low === high ? low - 8 : low - 4;
-  const ceiling = low === high ? high + 8 : high + 4;
-  const span = Math.max(1, ceiling - floor);
-  const yFor = (bpm: number) => 8 + ((ceiling - bpm) / span) * (CHART_HEIGHT - 20);
-  const xFor = (index: number) => {
-    if (points.length === 1) return Math.max(12, width - 16);
-    return 10 + (index / (points.length - 1)) * Math.max(0, width - 20);
-  };
-  const coords = width === 0 ? [] : points.map((bpm, index) => ({ x: xFor(index), y: yFor(bpm) }));
+  const floor = low === high ? low - 12 : low;
+  const span = Math.max(12, (low === high ? high + 12 : high) - floor);
 
   return (
-    <View style={styles.bpmChart} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
-      {coords.slice(1).map((point, index) => {
-        const previous = coords[index];
-        if (!previous) return null;
-        const dx = point.x - previous.x;
-        const dy = point.y - previous.y;
-        const length = Math.hypot(dx, dy);
-        const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+    <View style={styles.bpmChart}>
+      {points.map((bpm, index) => {
+        const latest = index === points.length - 1;
+        const height = 8 + ((bpm - floor) / span) * (CHART_HEIGHT - 16);
         return (
-          <View
-            key={`line-${index}`}
-            style={[
-              styles.bpmSegment,
-              {
-                left: (previous.x + point.x) / 2 - length / 2,
-                top: (previous.y + point.y) / 2 - 1.5,
-                width: length,
-                transform: [{ rotate: `${angle}deg` }],
-              },
-            ]}
-          />
-        );
-      })}
-      {coords.map((point, index) => {
-        const latest = index === coords.length - 1;
-        const size = latest ? 10 : 6;
-        return (
-          <View
-            key={`node-${index}`}
-            style={[
-              styles.bpmNode,
-              latest && styles.bpmNodeLatest,
-              { height: size, left: point.x - size / 2, top: point.y - size / 2, width: size },
-            ]}
-          />
+          <View key={`${index}-${bpm}`} style={styles.bpmColumn}>
+            <View style={[styles.bpmBar, latest && styles.bpmBarLatest, { height }]} />
+          </View>
         );
       })}
     </View>
@@ -493,20 +458,22 @@ const styles = StyleSheet.create({
     lineHeight: 42,
   },
   bpmChart: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    gap: 3,
     height: CHART_HEIGHT,
   },
-  bpmSegment: {
-    backgroundColor: colors.accent,
-    borderRadius: 2,
-    height: 3,
-    position: 'absolute',
+  bpmColumn: {
+    flex: 1,
+    height: '100%',
+    justifyContent: 'flex-end',
   },
-  bpmNode: {
-    backgroundColor: colors.text,
-    borderRadius: 99,
-    position: 'absolute',
+  bpmBar: {
+    backgroundColor: 'rgba(255,42,42,0.45)',
+    borderRadius: 3,
+    minHeight: 6,
   },
-  bpmNodeLatest: {
+  bpmBarLatest: {
     backgroundColor: colors.accent,
   },
   meter: {
