@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { bytesToBase64 } from './base64';
-import { SCAN_RESORT_MS, SCAN_STALE_MS, createScanTracker, resolveAdvertisedName, type ScanSighting } from './scanList';
+import { UART_SERVICE_UUID } from './protocol';
+import { SCAN_RESORT_MS, SCAN_STALE_MS, createScanTracker, heldSighting, resolveAdvertisedName, type ScanSighting } from './scanList';
 
 function sighting(overrides: Partial<ScanSighting> & Pick<ScanSighting, 'id'>): ScanSighting {
   return {
@@ -137,4 +138,60 @@ test('advertised names are recovered from the scan record and manufacturer data'
     }),
     'COLMI_CA02',
   );
+});
+
+test('a ring the phone is already holding stays listed without an advertisement', () => {
+  const tracker = createScanTracker();
+  tracker.observe(
+    heldSighting(
+      { id: 'ring', name: null, localName: null, rssi: null, serviceUUIDs: null },
+      'connected',
+      'COLMI_CA02',
+    ),
+    0,
+  );
+
+  const listed = tracker.snapshot(0);
+  assert.equal(listed[0]?.likely, true);
+  assert.equal(listed[0]?.name, 'COLMI_CA02');
+  assert.equal(listed[0]?.match, 'Connected to this phone');
+  assert.equal(listed[0]?.live, false);
+  assert.equal(tracker.hasFreshAdvertisement('ring', 0), false);
+  assert.equal(tracker.snapshot(SCAN_STALE_MS + 1).length, 0);
+});
+
+test('a live advertisement replaces the saved-ring note', () => {
+  const tracker = createScanTracker();
+  tracker.observe(
+    heldSighting(
+      { id: 'ring', name: null, localName: null, rssi: null, serviceUUIDs: null },
+      'saved',
+      'COLMI_CA02',
+    ),
+    0,
+  );
+  tracker.observe(sighting({ id: 'ring', localName: 'COLMI_CA02', rssi: -60 }), 1_000);
+
+  const listed = tracker.snapshot(1_000);
+  assert.equal(listed[0]?.match, 'Name COLMI_CA02');
+  assert.equal(listed[0]?.live, true);
+  assert.equal(tracker.hasFreshAdvertisement('ring', 1_000), true);
+});
+
+test('a connected headset stays on the list without being called the ring', () => {
+  const tracker = createScanTracker();
+  tracker.observe(
+    heldSighting(
+      { id: 'buds', name: 'AirPods', localName: null, rssi: null, serviceUUIDs: [UART_SERVICE_UUID] },
+      'connected',
+      null,
+    ),
+    0,
+  );
+
+  const listed = tracker.snapshot(0);
+  assert.equal(listed[0]?.name, 'AirPods');
+  assert.equal(listed[0]?.likely, false);
+  assert.equal(listed[0]?.live, false);
+  assert.equal(listed[0]?.match, 'Connected to this phone');
 });

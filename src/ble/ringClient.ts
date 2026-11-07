@@ -104,70 +104,89 @@ export class RingClient {
   static async connect(deviceId: string): Promise<RingClient> {
     debugLog(`Connecting ${deviceId}`);
     const manager = getBleManager();
-    let device: Device;
+    let device: Device | null = null;
+    let client: RingClient | null = null;
+    let setupFailed: Error | null = null;
     try {
       device = await manager.connectToDevice(deviceId, { timeout: 20000 });
       await device.discoverAllServicesAndCharacteristics();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'connection failed';
-      debugLog(`Connect failed ${deviceId}: ${message}`);
-      throw error;
-    }
 
-    let services = 'services unavailable';
-    try {
-      const found = await device.services();
-      services = found.map((service) => service.uuid).join(', ') || 'no services';
-    } catch (error) {
-      services = error instanceof Error ? error.message : 'could not list services';
-    }
-    debugLog(`Connected ${deviceId}. ${services}`);
+      let services = 'services unavailable';
+      try {
+        const found = await device.services();
+        services = found.map((service) => service.uuid).join(', ') || 'no services';
+      } catch (error) {
+        services = error instanceof Error ? error.message : 'could not list services';
+      }
+      debugLog(`Connected ${deviceId}. ${services}`);
 
-    const client = new RingClient(device);
-    client.notifying = true;
-    client.subscription = device.monitorCharacteristicForService(
-      UART_SERVICE_UUID,
-      UART_TX_UUID,
-      (error, characteristic) => {
-        if (error) {
-          if (!client.notifying) return;
-          debugLog(`Notify error on ${deviceId}: ${describeBleError(error)}`);
-          client.failAll(new Error(`The ring stopped sending data. ${describeBleError(error)}`));
-          return;
-        }
-        if (!characteristic?.value) return;
-        client.handleNotification(characteristic.value);
-      },
-    );
-    try {
-      client.bigDataSubscription = device.monitorCharacteristicForService(
-        BIG_DATA_SERVICE_UUID,
-        BIG_DATA_TX_UUID,
+      const ring = new RingClient(device);
+      client = ring;
+      ring.notifying = true;
+      ring.subscription = device.monitorCharacteristicForService(
+        UART_SERVICE_UUID,
+        UART_TX_UUID,
         (error, characteristic) => {
           if (error) {
-            if (!client.notifying) return;
-            debugLog(`Sleep notify error on ${deviceId}: ${describeBleError(error)}`);
-            client.failBigData(new Error(`The ring did not send sleep data. ${describeBleError(error)}`));
+            if (!ring.notifying) return;
+            const wrapped = new Error(`The ring stopped sending data. ${describeBleError(error)}`);
+            setupFailed ??= wrapped;
+            debugLog(`Notify error on ${deviceId}: ${describeBleError(error)}`);
+            ring.failAll(wrapped);
             return;
           }
           if (!characteristic?.value) return;
-          const chunk = base64ToBytes(characteristic.value);
-          client.bigDataWaiters.forEach((waiter) => waiter(chunk));
+          ring.handleNotification(characteristic.value);
         },
       );
-      client.bigDataReady = true;
+      try {
+        ring.bigDataSubscription = device.monitorCharacteristicForService(
+          BIG_DATA_SERVICE_UUID,
+          BIG_DATA_TX_UUID,
+          (error, characteristic) => {
+            if (error) {
+              if (!ring.notifying) return;
+              debugLog(`Sleep notify error on ${deviceId}: ${describeBleError(error)}`);
+              ring.failBigData(new Error(`The ring did not send sleep data. ${describeBleError(error)}`));
+              return;
+            }
+            if (!characteristic?.value) return;
+            const chunk = base64ToBytes(characteristic.value);
+            ring.bigDataWaiters.forEach((waiter) => waiter(chunk));
+          },
+        );
+        ring.bigDataReady = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'sleep notifications unavailable';
+        debugLog(`Sleep channel unavailable on ${deviceId}: ${message}`);
+      }
+      ring.disconnectSubscription = device.onDisconnected((error) => {
+        ring.open = false;
+        forgetRingSession(ring);
+        debugLog(error?.message ? `Link dropped ${deviceId}: ${error.message}` : `Link closed ${deviceId}`);
+        ring.failAll(new Error(error?.message ? `The ring disconnected. ${error.message}` : 'The ring disconnected.'));
+      });
+      await delay(300);
+      if (setupFailed || !ring.open) throw setupFailed ?? new Error('The ring disconnected.');
+      return ring;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'sleep notifications unavailable';
-      debugLog(`Sleep channel unavailable on ${deviceId}: ${message}`);
+      const message = error instanceof Error ? error.message : 'connection failed';
+      debugLog(`Connect failed ${deviceId}: ${message}`);
+      if (client) {
+        try {
+          await client.disconnect();
+        } catch {
+          // The failed attempt left no link to drop.
+        }
+      } else if (device) {
+        try {
+          await device.cancelConnection();
+        } catch {
+          // The failed attempt left no link to drop.
+        }
+      }
+      throw error;
     }
-    client.disconnectSubscription = device.onDisconnected((error) => {
-      client.open = false;
-      forgetRingSession(client);
-      debugLog(error?.message ? `Link dropped ${deviceId}: ${error.message}` : `Link closed ${deviceId}`);
-      client.failAll(new Error(error?.message ? `The ring disconnected. ${error.message}` : 'The ring disconnected.'));
-    });
-    await delay(300);
-    return client;
   }
 
   async disconnect(): Promise<void> {
@@ -577,6 +596,11 @@ function forgetRingSession(client: RingClient): void {
   if (openSession?.client === client) openSession = null;
 }
 
+function shouldRetryConnect(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+  return !/powered off|unauthorized|not authorized|permission/i.test(message);
+}
+
 export function hasOpenRing(ringId: string): boolean {
   return openSession?.ringId === ringId && openSession.client.isLive();
 }
@@ -588,9 +612,24 @@ export async function openRing(ringId: string): Promise<RingClient> {
     return current.client;
   }
   await closeRing();
-  const client = await RingClient.connect(ringId);
-  openSession = { ringId, client };
-  return client;
+  try {
+    const client = await RingClient.connect(ringId);
+    openSession = { ringId, client };
+    return client;
+  } catch (error) {
+    if (!shouldRetryConnect(error)) throw error;
+    const message = error instanceof Error ? error.message : 'connection failed';
+    debugLog(`Dropping a stuck phone link after: ${message}`);
+    try {
+      await getBleManager().cancelDeviceConnection(ringId);
+    } catch {
+      // The phone had no link left to drop.
+    }
+    await delay(1500);
+    const client = await RingClient.connect(ringId);
+    openSession = { ringId, client };
+    return client;
+  }
 }
 
 export async function closeRing(ringId?: string): Promise<boolean> {

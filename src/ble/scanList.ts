@@ -1,5 +1,5 @@
 import { base64ToBytes } from './base64';
-import { ringMatch } from './protocol';
+import { isLikelyRing, ringMatch } from './protocol';
 
 export const SCAN_STALE_MS = 15_000;
 export const SCAN_RESORT_MS = 4_000;
@@ -17,6 +17,7 @@ export type ScanSighting = {
   manufacturerData: string | null;
   rawScanRecord: string | null;
   isConnectable: boolean | null;
+  held?: 'connected' | 'saved';
 };
 
 export type ListedDevice = {
@@ -32,6 +33,7 @@ export type ListedDevice = {
   serviceUUIDs: string[];
   manufacturerPreview: string | null;
   connectable: boolean | null;
+  live: boolean;
 };
 
 type Entry = {
@@ -47,6 +49,7 @@ type Entry = {
   manufacturerPreview: string | null;
   connectable: boolean | null;
   onList: boolean;
+  advertisedAt: number;
 };
 
 const COLMI = [0x43, 0x4f, 0x4c, 0x4d, 0x49];
@@ -159,6 +162,30 @@ export function resolveAdvertisedName(sighting: {
   return candidates[0] ?? null;
 }
 
+export function heldSighting(
+  device: {
+    id: string;
+    name: string | null;
+    localName: string | null;
+    rssi: number | null;
+    serviceUUIDs: string[] | null;
+  },
+  source: 'connected' | 'saved',
+  fallbackName: string | null,
+): ScanSighting {
+  return {
+    id: device.id,
+    name: device.name,
+    localName: device.localName ?? fallbackName,
+    rssi: device.rssi,
+    serviceUUIDs: device.serviceUUIDs,
+    manufacturerData: null,
+    rawScanRecord: null,
+    isConnectable: true,
+    held: source,
+  };
+}
+
 function previewManufacturer(encoded: string | null): string | null {
   if (!encoded) return null;
   const bytes = base64ToBytes(encoded);
@@ -180,6 +207,10 @@ function mergeServices(current: string[], incoming: string[] | null): string[] {
     if (next.length >= 8) break;
   }
   return next;
+}
+
+function isHeldRing(entry: Entry): boolean {
+  return !entry.rawName || isLikelyRing(entry.rawName);
 }
 
 function displayName(entry: Entry): string {
@@ -205,6 +236,7 @@ function blankEntry(id: string): Entry {
     manufacturerPreview: null,
     connectable: null,
     onList: false,
+    advertisedAt: 0,
   };
 }
 
@@ -256,16 +288,29 @@ export function createScanTracker() {
       entry.smoothed = smoothRssi(entry.smoothed, sample);
       if (sample !== null) entry.rawRssi = sample;
       entry.lastSeenAt = now;
-      entry.hits += 1;
+      if (!sighting.held) entry.hits += 1;
       entry.serviceUUIDs = mergeServices(entry.serviceUUIDs, sighting.serviceUUIDs);
       const manufacturer = previewManufacturer(sighting.manufacturerData);
       if (manufacturer) entry.manufacturerPreview = manufacturer;
       if (sighting.isConnectable !== null) entry.connectable = sighting.isConnectable;
 
-      const match = ringMatch(entry.rawName, entry.serviceUUIDs);
-      if (match) {
+      if (sighting.held === 'saved' || (sighting.held === 'connected' && isHeldRing(entry))) {
         entry.likely = true;
-        entry.match = match;
+        entry.onList = true;
+        const heldMatch = sighting.held === 'connected' ? 'Connected to this phone' : 'Saved on this phone';
+        if (!entry.match || entry.match === 'Connected to this phone' || entry.match === 'Saved on this phone') {
+          entry.match = heldMatch;
+        }
+      } else if (sighting.held === 'connected') {
+        entry.onList = true;
+        if (!entry.match) entry.match = 'Connected to this phone';
+      } else {
+        entry.advertisedAt = now;
+        const match = ringMatch(entry.rawName, entry.serviceUUIDs);
+        if (match) {
+          entry.likely = true;
+          entry.match = match;
+        }
       }
 
       if (!entry.onList) {
@@ -280,6 +325,12 @@ export function createScanTracker() {
         return { announce: `${displayName(entry)} · ${entry.smoothed ?? '—'} dBm · ${entry.id}` };
       }
       return { announce: null };
+    },
+
+    hasFreshAdvertisement(id: string, now: number): boolean {
+      const entry = entries.get(id);
+      if (!entry || entry.advertisedAt <= 0) return false;
+      return now - entry.advertisedAt <= SCAN_STALE_MS;
     },
 
     snapshot(now: number): ListedDevice[] {
@@ -310,6 +361,7 @@ export function createScanTracker() {
           serviceUUIDs: entry.serviceUUIDs,
           manufacturerPreview: entry.manufacturerPreview,
           connectable: entry.connectable,
+          live: entry.advertisedAt > 0 && now - entry.advertisedAt <= SCAN_STALE_MS,
         });
       }
       return listed;

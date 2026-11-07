@@ -1,14 +1,17 @@
 import { ScanMode, type Device } from '@sfourdrinier/react-native-ble-plx';
 import { router } from 'expo-router';
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, Text } from 'react-native';
 
 import { debugLog, getDebugLines, subscribeDebugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
-import { createScanTracker, type ListedDevice, type ScanSighting } from '../ble/scanList';
+import { UART_SERVICE_UUID } from '../ble/protocol';
+import { closeRing } from '../ble/ringClient';
+import { createScanTracker, heldSighting, type ListedDevice, type ScanSighting } from '../ble/scanList';
+import { BIG_DATA_SERVICE_UUID } from '../ble/sleep';
 import { Button, colors } from '../components/ui';
 import { useAppState } from '../state/AppProvider';
-import { pauseAutoSync } from '../sync/ringGate';
+import { pauseAutoSync, runWithRing } from '../sync/ringGate';
 
 const NEARBY_PREVIEW = 6;
 
@@ -31,22 +34,33 @@ function toSighting(device: Device): ScanSighting {
 }
 
 function deviceDetail(device: ListedDevice): string {
+  const kind =
+    device.match === 'Connected to this phone' || device.match === 'Saved on this phone'
+      ? device.match
+      : device.likely
+        ? 'Colmi ring'
+        : 'Nearby';
   const parts = [
-    device.likely ? 'Colmi ring' : 'Nearby',
+    kind,
     device.rssi !== null ? `${device.rssi} dBm` : null,
-    device.ageSeconds === 0 ? 'seen now' : `seen ${device.ageSeconds}s ago`,
+    device.live ? (device.ageSeconds === 0 ? 'seen now' : `seen ${device.ageSeconds}s ago`) : 'not advertising',
   ];
   return parts.filter((part): part is string => Boolean(part)).join(' · ');
 }
 
 export default function ScanScreen() {
-  const { busy, settings, selectRing, forgetRing } = useAppState();
+  const { settings, selectRing, forgetRing } = useAppState();
   const [bleState, setBleState] = useState('Unknown');
   const [devices, setDevices] = useState<ListedDevice[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [debug, setDebug] = useState(true);
   const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
+
+  const savedId = useRef(settings.ringId);
+  const savedName = useRef(settings.ringName);
+  savedId.current = settings.ringId;
+  savedName.current = settings.ringName;
 
   useEffect(() => pauseAutoSync(), []);
 
@@ -61,18 +75,90 @@ export default function ScanScreen() {
       setDevices(tracker.snapshot(Date.now()));
     };
 
-    const interval = setInterval(publish, 1000);
-    debugLog('Scanning for Colmi names such as COLMI_CA02');
+    const loggedHeld = new Set<string>();
+    let lastHeldError = '';
 
-    const subscription = manager.onStateChange((state) => {
-      if (!active) return;
-      setBleState(state);
-      if (state !== 'PoweredOn') {
-        scanning = false;
-        void manager.stopDeviceScan();
+    const rememberHeld = async () => {
+      const now = Date.now();
+      try {
+        const connected = await manager.connectedDevices([UART_SERVICE_UUID, BIG_DATA_SERVICE_UUID]);
+        if (!active) return;
+        for (const device of connected) {
+          tracker.observe(
+            heldSighting(
+              {
+                id: device.id,
+                name: device.name,
+                localName: device.localName,
+                rssi: device.rssi,
+                serviceUUIDs: device.serviceUUIDs,
+              },
+              'connected',
+              device.id === savedId.current ? savedName.current : null,
+            ),
+            now,
+          );
+          if (!loggedHeld.has(device.id)) {
+            loggedHeld.add(device.id);
+            debugLog(`Phone is already connected to ${device.name || device.localName || device.id}`);
+          }
+        }
+      } catch (heldError) {
+        const message = heldError instanceof Error ? heldError.message : 'could not list connected devices';
+        if (message !== lastHeldError) {
+          lastHeldError = message;
+          debugLog(message);
+        }
+      }
+
+      const id = savedId.current;
+      if (!id || tracker.hasFreshAdvertisement(id, Date.now())) {
+        publish();
         return;
       }
-      if (scanning) return;
+      try {
+        const known = await manager.devices([id]);
+        if (!active) return;
+        for (const device of known) {
+          tracker.observe(
+            heldSighting(
+              {
+                id: device.id,
+                name: device.name,
+                localName: device.localName,
+                rssi: device.rssi,
+                serviceUUIDs: device.serviceUUIDs,
+              },
+              'saved',
+              savedName.current,
+            ),
+            Date.now(),
+          );
+        }
+      } catch (heldError) {
+        const message = heldError instanceof Error ? heldError.message : 'could not look up the saved ring';
+        if (message !== lastHeldError) {
+          lastHeldError = message;
+          debugLog(message);
+        }
+      }
+      publish();
+    };
+
+    let poweredOn = false;
+    let released = false;
+    let restarts = 0;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    const later = (action: () => void, ms: number) => {
+      const timer = setTimeout(() => {
+        if (active) action();
+      }, ms);
+      timers.push(timer);
+    };
+
+    const startScan = () => {
+      if (!active || !poweredOn || !released || scanning) return;
       scanning = true;
       void manager
         .startDeviceScan(
@@ -81,10 +167,17 @@ export default function ScanScreen() {
           (scanError, device) => {
             if (!active) return;
             if (scanError) {
+              scanning = false;
               setError(scanError.message);
               debugLog(`Scan error: ${scanError.message}`);
+              void manager.stopDeviceScan();
+              if (restarts < 2) {
+                restarts += 1;
+                later(startScan, 800);
+              }
               return;
             }
+            restarts = 0;
             if (!device) return;
             const result = tracker.observe(toSighting(device), Date.now());
             if (result.announce) {
@@ -99,12 +192,57 @@ export default function ScanScreen() {
           const message = scanError instanceof Error ? scanError.message : 'Bluetooth scan failed.';
           setError(message);
           debugLog(message);
+          if (restarts < 2) {
+            restarts += 1;
+            later(startScan, 800);
+          }
         });
+    };
+
+    const releaseAndScan = async () => {
+      await runWithRing(async () => {
+        await closeRing();
+        const id = savedId.current;
+        if (!id) return;
+        try {
+          await manager.cancelDeviceConnection(id);
+          debugLog(`Released ${id} so it can advertise`);
+        } catch {
+          debugLog(`No app link to release for ${id}`);
+        }
+      });
+      await new Promise((resolve) => later(() => resolve(undefined), 800));
+      if (!active) return;
+      released = true;
+      await rememberHeld();
+      debugLog('Scanning for Colmi names such as COLMI_CA02');
+      startScan();
+    };
+    void releaseAndScan();
+
+    const interval = setInterval(publish, 1000);
+    const heldInterval = setInterval(() => {
+      void rememberHeld();
+    }, 2000);
+
+    const subscription = manager.onStateChange((state) => {
+      if (!active) return;
+      setBleState(state);
+      if (state !== 'PoweredOn') {
+        poweredOn = false;
+        scanning = false;
+        void manager.stopDeviceScan();
+        return;
+      }
+      poweredOn = true;
+      startScan();
     }, true);
 
     return () => {
       active = false;
       clearInterval(interval);
+      clearInterval(heldInterval);
+      timers.forEach(clearTimeout);
       subscription.remove();
       void manager.stopDeviceScan();
     };
@@ -123,8 +261,9 @@ export default function ScanScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
       <Text style={styles.body}>
-        Bluetooth is {bleState}. QRing shows this ring as COLMI_CA02. Hold it against the phone. Names stay on
-        screen for about 15 seconds, and the order refreshes every few seconds.
+        Bluetooth is {bleState}. Hold the ring against the phone. A ring iOS is already connected to stops advertising,
+        so this screen drops the app link first and lists a ring the phone is still holding. If it shows under Settings,
+        Bluetooth, forget it there.
       </Text>
       {settings.ringId ? (
         <>
@@ -151,7 +290,6 @@ export default function ScanScreen() {
         <DeviceRow
           debug={debug}
           device={device}
-          disabled={busy}
           key={device.id}
           onPress={() => void choose(device)}
           selected={device.id === settings.ringId}
@@ -166,7 +304,6 @@ export default function ScanScreen() {
         <DeviceRow
           debug={debug}
           device={device}
-          disabled={busy}
           key={device.id}
           onPress={() => void choose(device)}
           selected={device.id === settings.ringId}
@@ -207,13 +344,11 @@ function DeviceRow({
   device,
   selected,
   debug,
-  disabled,
   onPress,
 }: {
   device: ListedDevice;
   selected: boolean;
   debug: boolean;
-  disabled: boolean;
   onPress: () => void;
 }) {
   const debugLines = [
@@ -227,11 +362,7 @@ function DeviceRow({
   ].filter((line): line is string => Boolean(line));
 
   return (
-    <Pressable
-      disabled={disabled}
-      onPress={onPress}
-      style={[styles.row, (device.likely || selected) && styles.likelyRow]}
-    >
+    <Pressable onPress={onPress} style={[styles.row, (device.likely || selected) && styles.likelyRow]}>
       <Text style={styles.name}>
         {device.name}
         {selected ? ' · Selected' : ''}
