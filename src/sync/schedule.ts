@@ -15,6 +15,7 @@ export const VITALS_INTERVAL_MS = VITALS_MINUTES * 60 * 1000;
 export const SLEEP_INTERVAL_MS = SLEEP_HOURS * 60 * 60 * 1000;
 export const RETRY_INTERVAL_MS = RETRY_MINUTES * 60 * 1000;
 export const UNWORN_INTERVAL_MS = HISTORY_INTERVAL_MS;
+export const UPLOAD_INTERVAL_MS = 60 * 60 * 1000;
 
 export type SyncPlan = {
   logs: boolean;
@@ -28,6 +29,7 @@ export type AutoSyncState = {
   sleepAt: string | null;
   failedAt: string | null;
   asleepAt: string | null;
+  uploadAt: string | null;
 };
 
 export const emptyAutoSyncState: AutoSyncState = {
@@ -36,6 +38,7 @@ export const emptyAutoSyncState: AutoSyncState = {
   sleepAt: null,
   failedAt: null,
   asleepAt: null,
+  uploadAt: null,
 };
 
 const idlePlan: SyncPlan = { logs: false, vitals: false, sleep: false };
@@ -70,6 +73,17 @@ export function evaluateSchedule(state: AutoSyncState, now: number): { plan: Syn
     };
   }
   return { plan, waitMs: 0 };
+}
+
+export function evaluateUpload(
+  uploadAt: string | null,
+  pendingCount: number,
+  now: number,
+): { due: boolean; waitMs: number | null } {
+  if (pendingCount <= 0) return { due: false, waitMs: null };
+  const waitMs = remaining(uploadAt, UPLOAD_INTERVAL_MS, now);
+  if (waitMs <= 0) return { due: true, waitMs: 0 };
+  return { due: false, waitMs };
 }
 
 export function readingChanged(previous: UploadPayload | null, next: UploadPayload): boolean {

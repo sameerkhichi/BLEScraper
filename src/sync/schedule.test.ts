@@ -5,9 +5,11 @@ import type { UploadPayload } from '../model';
 import {
   emptyAutoSyncState,
   evaluateSchedule,
+  evaluateUpload,
   HISTORY_INTERVAL_MS,
   readingChanged,
   RETRY_INTERVAL_MS,
+  UPLOAD_INTERVAL_MS,
   VITALS_INTERVAL_MS,
 } from './schedule';
 
@@ -120,6 +122,25 @@ test('a clock jump does not schedule a multi-hour wait', () => {
   );
   assert.equal(decision.plan.logs, false);
   assert.equal(decision.waitMs, HISTORY_INTERVAL_MS);
+});
+
+test('an empty queue does not schedule an upload', () => {
+  assert.deepEqual(evaluateUpload(null, 0, t0), { due: false, waitMs: null });
+  assert.deepEqual(evaluateUpload(new Date(t0).toISOString(), 0, t0 + 20 * 60 * 1000), { due: false, waitMs: null });
+});
+
+test('waiting readings with no previous attempt are due', () => {
+  assert.deepEqual(evaluateUpload(null, 2, t0), { due: true, waitMs: 0 });
+});
+
+test('an upload attempt waits out the rest of the hour', () => {
+  const decision = evaluateUpload(new Date(t0).toISOString(), 1, t0 + 20 * 60 * 1000);
+  assert.equal(decision.due, false);
+  assert.equal(decision.waitMs, UPLOAD_INTERVAL_MS - 20 * 60 * 1000);
+});
+
+test('an upload attempt is due again after an hour', () => {
+  assert.deepEqual(evaluateUpload(new Date(t0).toISOString(), 1, t0 + UPLOAD_INTERVAL_MS), { due: true, waitMs: 0 });
 });
 
 test('an unchanged syncedAt does not count as a new reading', () => {

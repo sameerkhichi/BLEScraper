@@ -5,11 +5,13 @@ import { closeRing } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
 import { mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
-import { markRingAsleep, markSyncCompleted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
+import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
 import { runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
+import { evaluateUpload } from '../sync/schedule';
 import {
+  loadAutoSyncState,
   loadLastPayload,
   loadQueue,
   loadSettings,
@@ -58,7 +60,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
         setStatus('Saved on the phone. Add an API URL in Settings to send it.');
         return;
       }
+      if (nextQueue.length === 0) {
+        setStatus('Nothing waiting to send.');
+        return;
+      }
       setStatus('Sending to the API');
+      await markUploadAttempted();
       const result = await flushQueue(nextQueue, (payload) => postPayload(currentSettings, payload));
       await publishQueue(result.remaining);
       if (result.error) {
@@ -93,17 +100,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
-      const [storedSettings, storedQueue, storedLast] = await Promise.all([
+      const [storedSettings, storedQueue, storedLast, syncState] = await Promise.all([
         loadSettings(),
         loadQueue(),
         loadLastPayload(),
+        loadAutoSyncState(),
       ]);
       if (cancelled) return;
       setSettings(storedSettings);
       setQueue(storedQueue);
       setLastPayload(storedLast);
       setReady(true);
-      if (storedSettings.apiUrl.trim() && storedQueue.length > 0) {
+      const upload = evaluateUpload(syncState.uploadAt, storedQueue.length, Date.now());
+      if (storedSettings.apiUrl.trim() && upload.due) {
         await runWithRing(() => sendQueue(storedQueue, storedSettings));
       }
     };
@@ -178,13 +187,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (next: AppSettings) => {
       setSettings(next);
       await saveSettings(next);
-      if (queue.length > 0) {
-        await sendQueue(queue, next);
+      const storedQueue = await loadQueue();
+      if (storedQueue.length > 0) {
+        await sendQueue(storedQueue, next);
       } else {
         setStatus('Settings saved.');
       }
     },
-    [queue, sendQueue],
+    [sendQueue],
   );
 
   const releaseRing = useCallback(async (ringId: string | null) => {
