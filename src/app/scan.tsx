@@ -8,6 +8,7 @@ import { getBleManager } from '../ble/manager';
 import { createScanTracker, type ListedDevice, type ScanSighting } from '../ble/scanList';
 import { Button, colors } from '../components/ui';
 import { useAppState } from '../state/AppProvider';
+import { pauseAutoSync } from '../sync/ringGate';
 
 const NEARBY_PREVIEW = 6;
 
@@ -46,6 +47,8 @@ export default function ScanScreen() {
   const [showAll, setShowAll] = useState(false);
   const [debug, setDebug] = useState(true);
   const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
+
+  useEffect(() => pauseAutoSync(), []);
 
   useEffect(() => {
     let active = true;

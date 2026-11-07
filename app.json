@@ -13,6 +13,8 @@
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery.",
         "NSBluetoothPeripheralUsageDescription": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery.",
+        "UIBackgroundModes": ["bluetooth-central", "processing"],
+        "BGTaskSchedulerPermittedIdentifiers": ["com.expo.modules.backgroundtask.processing"],
         "ITSAppUsesNonExemptEncryption": false,
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": true
@@ -31,7 +33,8 @@
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT"
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.POST_NOTIFICATIONS"
       ]
     },
     "web": {
@@ -42,11 +45,12 @@
       [
         "@sfourdrinier/react-native-ble-plx",
         {
-          "isBackgroundEnabled": false,
-          "modes": [
-            "central"
-          ],
-          "bluetoothAlwaysPermission": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery."
+          "isBackgroundEnabled": true,
+          "modes": ["central"],
+          "bluetoothAlwaysPermission": "BLEScraper connects to your Colmi R09 ring to read heart rate, blood oxygen, temperature, motion, sleep, and battery.",
+          "iosEnableRestoration": true,
+          "iosRestorationIdentifier": "com.sameer.blescraper.ble",
+          "androidEnableForegroundService": true
         }
       ]
     ],

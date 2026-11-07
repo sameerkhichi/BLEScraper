@@ -2,10 +2,12 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { defaultSettings, isAccelSample, isSleepNight, type AppSettings, type UploadPayload } from '../model';
 import type { PendingUpload } from './queue';
+import { emptyAutoSyncState, type AutoSyncState } from './schedule';
 
 const SETTINGS_KEY = 'blescraper.settings';
 const QUEUE_KEY = 'blescraper.queue';
 const LAST_KEY = 'blescraper.lastPayload';
+const AUTO_SYNC_KEY = 'blescraper.autoSync';
 
 export async function loadSettings(): Promise<AppSettings> {
   const raw = await AsyncStorage.getItem(SETTINGS_KEY);
@@ -16,6 +18,7 @@ export async function loadSettings(): Promise<AppSettings> {
     apiKey: typeof parsed.apiKey === 'string' ? parsed.apiKey : '',
     ringId: typeof parsed.ringId === 'string' ? parsed.ringId : null,
     ringName: typeof parsed.ringName === 'string' ? parsed.ringName : null,
+    autoSync: typeof parsed.autoSync === 'boolean' ? parsed.autoSync : true,
   };
 }
 
@@ -49,4 +52,25 @@ export async function loadLastPayload(): Promise<UploadPayload | null> {
 
 export async function saveLastPayload(payload: UploadPayload): Promise<void> {
   await AsyncStorage.setItem(LAST_KEY, JSON.stringify(payload));
+}
+
+export async function loadAutoSyncState(): Promise<AutoSyncState> {
+  const raw = await AsyncStorage.getItem(AUTO_SYNC_KEY);
+  if (!raw) return emptyAutoSyncState;
+  const parsed = JSON.parse(raw) as Partial<AutoSyncState>;
+  return {
+    logsAt: timeOrNull(parsed.logsAt),
+    vitalsAt: timeOrNull(parsed.vitalsAt),
+    sleepAt: timeOrNull(parsed.sleepAt),
+    failedAt: timeOrNull(parsed.failedAt),
+  };
+}
+
+export async function saveAutoSyncState(state: AutoSyncState): Promise<void> {
+  await AsyncStorage.setItem(AUTO_SYNC_KEY, JSON.stringify(state));
+}
+
+function timeOrNull(value: unknown): string | null {
+  if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) return null;
+  return value;
 }

@@ -1,0 +1,106 @@
+import type { UploadPayload } from '../model';
+
+// The ring stores steps in 15-minute blocks and heart rate about every 5 minutes.
+// Polling the logs faster than that keeps the radio awake without new samples.
+// SpO2 and temperature turn the ring lights on for up to half a minute each,
+// so those run half as often and share one connection with the log read.
+export const HISTORY_MINUTES = 15;
+export const VITALS_MINUTES = 30;
+export const SLEEP_HOURS = 6;
+export const RETRY_MINUTES = 15;
+
+export const HISTORY_INTERVAL_MS = HISTORY_MINUTES * 60 * 1000;
+export const VITALS_INTERVAL_MS = VITALS_MINUTES * 60 * 1000;
+export const SLEEP_INTERVAL_MS = SLEEP_HOURS * 60 * 60 * 1000;
+export const RETRY_INTERVAL_MS = RETRY_MINUTES * 60 * 1000;
+
+export type SyncPlan = {
+  logs: boolean;
+  vitals: boolean;
+  sleep: boolean;
+};
+
+export type AutoSyncState = {
+  logsAt: string | null;
+  vitalsAt: string | null;
+  sleepAt: string | null;
+  failedAt: string | null;
+};
+
+export const emptyAutoSyncState: AutoSyncState = {
+  logsAt: null,
+  vitalsAt: null,
+  sleepAt: null,
+  failedAt: null,
+};
+
+const idlePlan: SyncPlan = { logs: false, vitals: false, sleep: false };
+
+export function shouldSync(plan: SyncPlan): boolean {
+  return plan.logs || plan.vitals || plan.sleep;
+}
+
+export function evaluateSchedule(state: AutoSyncState, now: number): { plan: SyncPlan; waitMs: number } {
+  const failedAt = parseTime(state.failedAt);
+  if (failedAt !== null && now - failedAt < RETRY_INTERVAL_MS) {
+    return { plan: idlePlan, waitMs: clampWait(failedAt + RETRY_INTERVAL_MS - now) };
+  }
+
+  const logsDue = due(state.logsAt, HISTORY_INTERVAL_MS, now);
+  const vitalsDue = due(state.vitalsAt, VITALS_INTERVAL_MS, now);
+  const sleepDue = due(state.sleepAt, SLEEP_INTERVAL_MS, now);
+  const plan: SyncPlan = {
+    logs: logsDue || vitalsDue || sleepDue,
+    vitals: vitalsDue,
+    sleep: sleepDue,
+  };
+  if (!shouldSync(plan)) {
+    return {
+      plan,
+      waitMs: clampWait(
+        Math.min(remaining(state.logsAt, HISTORY_INTERVAL_MS, now), remaining(state.vitalsAt, VITALS_INTERVAL_MS, now)),
+      ),
+    };
+  }
+  return { plan, waitMs: 0 };
+}
+
+export function readingChanged(previous: UploadPayload | null, next: UploadPayload): boolean {
+  if (!previous) return true;
+  return snapshot(previous) !== snapshot(next);
+}
+
+function snapshot(payload: UploadPayload): string {
+  return JSON.stringify({
+    battery: payload.battery,
+    realtimeHeartRate: payload.realtimeHeartRate,
+    spo2: payload.spo2,
+    bodyTemperatureC: payload.bodyTemperatureC,
+    heartRate: payload.heartRate,
+    steps: payload.steps,
+    sleep: payload.sleep,
+  });
+}
+
+function due(at: string | null, intervalMs: number, now: number): boolean {
+  const then = parseTime(at);
+  if (then === null) return true;
+  return now - then >= intervalMs;
+}
+
+function remaining(at: string | null, intervalMs: number, now: number): number {
+  const then = parseTime(at);
+  if (then === null) return 0;
+  return Math.max(0, then + intervalMs - now);
+}
+
+function parseTime(value: string | null): number | null {
+  if (!value) return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function clampWait(ms: number): number {
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  return Math.min(ms, HISTORY_INTERVAL_MS);
+}

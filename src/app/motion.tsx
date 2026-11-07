@@ -6,6 +6,7 @@ import { openRing } from '../ble/ringClient';
 import type { RawSensorFrame } from '../ble/protocol';
 import { Button, Card, colors } from '../components/ui';
 import type { AccelSample } from '../model';
+import { pauseAutoSync } from '../sync/ringGate';
 import { useAppState } from '../state/AppProvider';
 
 function round3(value: number): number {
@@ -29,9 +30,11 @@ export default function MotionScreen() {
 
   useEffect(() => {
     mounted.current = true;
+    const resume = pauseAutoSync();
     return () => {
       mounted.current = false;
       stopRef.current?.();
+      resume();
     };
   }, []);
 

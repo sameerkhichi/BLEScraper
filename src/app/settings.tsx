@@ -1,27 +1,36 @@
 import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput } from 'react-native';
+import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { Button, colors } from '../components/ui';
+import { HISTORY_MINUTES, SLEEP_HOURS, VITALS_MINUTES } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 export default function SettingsScreen() {
   const { busy, settings, saveAppSettings } = useAppState();
   const [apiUrl, setApiUrl] = useState(settings.apiUrl);
   const [apiKey, setApiKey] = useState(settings.apiKey);
+  const [autoSync, setAutoSync] = useState(settings.autoSync);
 
   useEffect(() => {
     setApiUrl(settings.apiUrl);
     setApiKey(settings.apiKey);
-  }, [settings.apiUrl, settings.apiKey]);
+    setAutoSync(settings.autoSync);
+  }, [settings.apiUrl, settings.apiKey, settings.autoSync]);
 
   const save = async () => {
     await saveAppSettings({
       ...settings,
       apiUrl: apiUrl.trim(),
       apiKey: apiKey.trim(),
+      autoSync,
     });
     router.back();
+  };
+
+  const toggleAutoSync = (value: boolean) => {
+    setAutoSync(value);
+    void saveAppSettings({ ...settings, autoSync: value });
   };
 
   return (
@@ -30,6 +39,23 @@ export default function SettingsScreen() {
         <Text style={styles.body}>
           The phone POSTs one JSON reading to this URL. Use the public address of the Arduino if it is behind port forwarding.
         </Text>
+        <View style={styles.row}>
+          <View style={styles.rowText}>
+            <Text style={styles.label}>Keep syncing</Text>
+            <Text style={styles.body}>
+              Steps and stored heart rate every {HISTORY_MINUTES} minutes. Live heart rate, SpO2, and temperature every {VITALS_MINUTES} minutes.
+              Sleep about every {SLEEP_HOURS} hours. The phone disconnects after each check. iOS may wait longer once the app is closed.
+              Android shows a notification only while a check is running.
+            </Text>
+          </View>
+          <Switch
+            accessibilityLabel="Keep syncing"
+            onValueChange={(value) => toggleAutoSync(value)}
+            thumbColor={colors.text}
+            trackColor={{ false: colors.line, true: colors.accent }}
+            value={autoSync}
+          />
+        </View>
         <Text style={styles.label}>API URL</Text>
         <TextInput
           autoCapitalize="none"
@@ -72,6 +98,15 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 16,
     lineHeight: 22,
+  },
+  row: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    gap: 12,
+  },
+  rowText: {
+    flex: 1,
+    gap: 6,
   },
   label: {
     color: colors.muted,

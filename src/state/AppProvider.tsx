@@ -1,10 +1,14 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { AppState } from 'react-native';
 
-import { debugLog } from '../ble/debugLog';
 import { closeRing } from '../ble/ringClient';
+import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
-import { mergeReadings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
+import { mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
+import { markSyncCompleted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
+import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
+import { runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
 import {
   loadLastPayload,
   loadQueue,
@@ -39,15 +43,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [ready, setReady] = useState(false);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Ready when the ring is nearby.');
-  const [settings, setSettings] = useState<AppSettings>({
-    apiUrl: '',
-    apiKey: '',
-    ringId: null,
-    ringName: null,
-  });
+  const [settings, setSettings] = useState<AppSettings>(defaultSettings);
   const [queue, setQueue] = useState<PendingUpload[]>([]);
   const [lastPayload, setLastPayload] = useState<UploadPayload | null>(null);
-  const ringUse = useRef(0);
 
   const publishQueue = useCallback(async (next: PendingUpload[]) => {
     setQueue(next);
@@ -76,6 +74,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [publishQueue],
   );
 
+  const remember = useCallback(async (payload: UploadPayload) => {
+    setLastPayload(payload);
+    await saveLastPayload(payload);
+  }, []);
+
+  useEffect(() => setAutoSyncStatusSink(setStatus), []);
+  useEffect(
+    () =>
+      setSyncSnapshotSink((snapshot) => {
+        setQueue(snapshot.queue);
+        setLastPayload(snapshot.lastPayload);
+      }),
+    [],
+  );
+  useEffect(() => subscribeRingBusy(setBusy), []);
+
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
@@ -90,7 +104,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLastPayload(storedLast);
       setReady(true);
       if (storedSettings.apiUrl.trim() && storedQueue.length > 0) {
-        await sendQueue(storedQueue, storedSettings);
+        await runWithRing(() => sendQueue(storedQueue, storedSettings));
       }
     };
     load().catch((error: unknown) => {
@@ -104,20 +118,60 @@ export function AppProvider({ children }: { children: ReactNode }) {
     };
   }, [sendQueue]);
 
-  const remember = useCallback(async (payload: UploadPayload) => {
-    setLastPayload(payload);
-    await saveLastPayload(payload);
-  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let appActive = AppState.currentState === 'active';
+    const enabled = settings.autoSync && Boolean(settings.ringId);
+
+    const arm = (waitMs: number) => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        void tick(appActive);
+      }, Math.max(waitMs, 1000));
+    };
+
+    const tick = async (allowAndroidService: boolean) => {
+      if (cancelled) return;
+      const result = await runAutoSync({ allowAndroidService });
+      if (cancelled) return;
+      if (result.message) setStatus(result.message);
+      arm(result.waitMs);
+    };
+
+    void syncBackgroundRegistration(enabled);
+    if (!enabled) {
+      return () => {
+        cancelled = true;
+        if (timer) clearTimeout(timer);
+      };
+    }
+
+    const subscription = AppState.addEventListener('change', (next) => {
+      const wasActive = appActive;
+      appActive = next === 'active';
+      if (next === 'active' || next === 'inactive' || next === 'background') {
+        void tick(wasActive || next === 'active');
+      }
+    });
+    arm(1000);
+
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+      subscription.remove();
+    };
+  }, [ready, settings.autoSync, settings.ringId]);
 
   const withRing = useCallback(async <T,>(action: () => Promise<T>): Promise<T> => {
-    ringUse.current += 1;
-    setBusy(true);
-    try {
-      return await action();
-    } finally {
-      ringUse.current = Math.max(0, ringUse.current - 1);
-      if (ringUse.current === 0) setBusy(false);
-    }
+    return runWithRing(async () => {
+      try {
+        return await action();
+      } finally {
+        await closeRing();
+      }
+    });
   }, []);
 
   const saveAppSettings = useCallback(
@@ -147,97 +201,122 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const selectRing = useCallback(
     async (ringId: string, ringName: string | null) => {
-      const previous = settings.ringId;
-      const next = { ...settings, ringId, ringName };
-      setSettings(next);
-      await saveSettings(next);
-      if (previous && previous !== ringId) await releaseRing(previous);
-      setStatus(`Saved ${ringName || 'ring'}.`);
-      debugLog(`Selected ${ringName || ringId}`);
+      await runWithRing(async () => {
+        const stored = await loadSettings();
+        const previous = stored.ringId;
+        const next = { ...stored, ringId, ringName };
+        setSettings(next);
+        await saveSettings(next);
+        if (previous && previous !== ringId) await releaseRing(previous);
+        setStatus(`Saved ${ringName || 'ring'}.`);
+        debugLog(`Selected ${ringName || ringId}`);
+      });
     },
-    [releaseRing, settings],
+    [releaseRing],
   );
 
   const forgetRing = useCallback(async () => {
-    const ringId = settings.ringId;
-    const next = { ...settings, ringId: null, ringName: null };
-    setSettings(next);
-    await saveSettings(next);
-    await releaseRing(ringId);
-    setStatus('Disconnected.');
-    debugLog('Forgot the selected ring');
-  }, [releaseRing, settings]);
+    await runWithRing(async () => {
+      const stored = await loadSettings();
+      const next = { ...stored, ringId: null, ringName: null };
+      setSettings(next);
+      await saveSettings(next);
+      await releaseRing(stored.ringId);
+      setStatus('Disconnected.');
+      debugLog('Forgot the selected ring');
+    });
+  }, [releaseRing]);
 
   const sync = useCallback(async () => {
-    if (!settings.ringId) {
-      setStatus('Choose the ring first.');
-      return;
-    }
     await withRing(async () => {
+      const stored = await loadSettings();
+      if (!stored.ringId) {
+        setStatus('Choose the ring first.');
+        return;
+      }
       try {
-        const payload = await syncRing(settings.ringId!, settings.ringName, setStatus);
-        await remember(mergeReadings(lastPayload, payload, false));
-        const nextQueue = enqueue(queue, payload);
+        const previous = await loadLastPayload();
+        const storedQueue = await loadQueue();
+        const collected = await syncRing(stored.ringId, stored.ringName, setStatus);
+        await closeRing();
+        const payload =
+          collected.sleepLoaded || !previous
+            ? collected.payload
+            : { ...collected.payload, sleep: previous.sleep };
+        const merged = mergeReadings(previous, payload, false);
+        await remember(merged);
+        const nextQueue = enqueue(storedQueue, payload);
         await publishQueue(nextQueue);
-        await sendQueue(nextQueue, settings);
+        await sendQueue(nextQueue, stored);
+        await markSyncCompleted({ logs: true, sleep: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Sync failed.';
         debugLog(message);
         setStatus(message);
       }
     });
-  }, [lastPayload, publishQueue, queue, remember, sendQueue, settings, withRing]);
+  }, [publishQueue, remember, sendQueue, withRing]);
 
   const scan = useCallback(async (kind: ScanKind) => {
-    if (!settings.ringId) {
-      setStatus('Choose the ring first.');
-      return;
-    }
     await withRing(async () => {
+      const stored = await loadSettings();
+      if (!stored.ringId) {
+        setStatus('Choose the ring first.');
+        return;
+      }
       try {
-        const payload = await scanRing(settings.ringId!, settings.ringName, kind, setStatus);
+        const previous = await loadLastPayload();
+        const storedQueue = await loadQueue();
+        const payload = await scanRing(stored.ringId, stored.ringName, kind, setStatus);
+        await closeRing();
         const succeeded =
           payload.realtimeHeartRate !== null || payload.spo2 !== null || payload.bodyTemperatureC !== null;
         if (!succeeded) {
           setStatus(payload.warnings.join(' ') || 'The ring did not return a reading.');
           return;
         }
-        await remember(mergeReadings(lastPayload, payload, true));
-        const nextQueue = enqueue(queue, payload);
+        await remember(mergeReadings(previous, payload, true));
+        const nextQueue = enqueue(storedQueue, payload);
         await publishQueue(nextQueue);
-        await sendQueue(nextQueue, settings);
+        await sendQueue(nextQueue, stored);
+        await markSyncCompleted({ vitals: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Measurement failed.';
         debugLog(message);
         setStatus(message);
       }
     });
-  }, [lastPayload, publishQueue, queue, remember, sendQueue, settings, withRing]);
+  }, [publishQueue, remember, sendQueue, withRing]);
 
   const recordMotion = useCallback(async (sample: AccelSample) => {
-    if (!settings.ringId) {
-      setStatus('Choose the ring first.');
-      return;
-    }
-    const payload = readingPayload(settings.ringId, settings.ringName, { accelerometer: sample });
-    await remember(mergeReadings(lastPayload, payload, true));
-    const nextQueue = enqueue(queue, payload);
-    await publishQueue(nextQueue);
-    await sendQueue(nextQueue, settings);
-  }, [lastPayload, publishQueue, queue, remember, sendQueue, settings]);
+    await runWithQueue(async () => {
+      const stored = await loadSettings();
+      if (!stored.ringId) {
+        setStatus('Choose the ring first.');
+        return;
+      }
+      const previous = await loadLastPayload();
+      const storedQueue = await loadQueue();
+      const payload = readingPayload(stored.ringId, stored.ringName, { accelerometer: sample });
+      await remember(mergeReadings(previous, payload, true));
+      const nextQueue = enqueue(storedQueue, payload);
+      await publishQueue(nextQueue);
+      await sendQueue(nextQueue, stored);
+    });
+  }, [publishQueue, remember, sendQueue]);
 
   const sendPending = useCallback(async () => {
-    setBusy(true);
-    try {
-      await sendQueue(queue, settings);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Upload failed.';
-      debugLog(message);
-      setStatus(message);
-    } finally {
-      setBusy(false);
-    }
-  }, [queue, sendQueue, settings]);
+    await runWithRing(async () => {
+      try {
+        const stored = await loadSettings();
+        await sendQueue(await loadQueue(), stored);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Upload failed.';
+        debugLog(message);
+        setStatus(message);
+      }
+    });
+  }, [sendQueue]);
 
   const value = useMemo(
     () => ({

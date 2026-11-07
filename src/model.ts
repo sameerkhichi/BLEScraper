@@ -3,6 +3,7 @@ export type AppSettings = {
   apiKey: string;
   ringId: string | null;
   ringName: string | null;
+  autoSync: boolean;
 };
 
 export type BatteryReading = {
@@ -132,4 +133,5 @@ export const defaultSettings: AppSettings = {
   apiKey: '',
   ringId: null,
   ringName: null,
+  autoSync: true,
 };

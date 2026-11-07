@@ -5,6 +5,7 @@ import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, View } from 
 import { getDebugLines, subscribeDebugLog } from '../ble/debugLog';
 import { Button, Card, colors } from '../components/ui';
 import type { UploadPayload } from '../model';
+import { HISTORY_MINUTES, VITALS_MINUTES } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 function totalSteps(payload: { steps: { steps: number }[] } | null): number {
@@ -51,7 +52,7 @@ export default function HomeScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
       <Text style={styles.kicker}>Colmi R09</Text>
-      <Text style={styles.title}>Pull the ring, then hand the reading to the Arduino.</Text>
+      <Text style={styles.title}>The ring checks in on a timer, then the reading goes to the Arduino.</Text>
 
       <Card>
         <Text style={styles.label}>Status</Text>
@@ -135,6 +136,11 @@ export default function HomeScreen() {
           void sync();
         }}
       />
+      <Text style={styles.meta}>
+        {settings.autoSync
+          ? `Automatic sync reads steps and stored heart rate every ${HISTORY_MINUTES} minutes, and live heart rate, SpO2, and temperature every ${VITALS_MINUTES} minutes. Bluetooth disconnects between checks.`
+          : 'Automatic sync is off. Turn it on in Settings.'}
+      </Text>
       <Text style={styles.kicker}>Scans</Text>
       <Text style={styles.meta}>Each option talks to a different sensor. All sensors runs heart rate, blood oxygen, and temperature one after another.</Text>
       <Button disabled={busy} label="Measure heart rate" onPress={() => requireRing(() => void scan('heart-rate'))} tone="secondary" />

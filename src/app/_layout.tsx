@@ -1,3 +1,4 @@
+import '../sync/backgroundSync';
 import { Stack } from 'expo-router';
 
 import { AppProvider } from '../state/AppProvider';

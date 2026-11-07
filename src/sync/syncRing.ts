@@ -1,6 +1,7 @@
-import type { ScanKind, UploadPayload } from '../model';
+import { hasOpenRing, openRing, type RingClient } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
-import { hasOpenRing, openRing } from '../ble/ringClient';
+import type { ScanKind, UploadPayload } from '../model';
+import type { SyncPlan } from './schedule';
 
 function report(onStatus: (message: string) => void, message: string): void {
   debugLog(message);
@@ -11,61 +12,96 @@ export async function syncRing(
   ringId: string,
   ringName: string | null,
   onStatus: (message: string) => void,
-): Promise<UploadPayload> {
+): Promise<{ payload: UploadPayload; sleepLoaded: boolean }> {
   report(onStatus, hasOpenRing(ringId) ? 'Using the open connection' : 'Connecting to the ring');
   const client = await openRing(ringId);
+  return collectRing(client, ringId, ringName, { logs: true, vitals: false, sleep: true }, onStatus);
+}
+
+export async function collectRing(
+  client: RingClient,
+  ringId: string,
+  ringName: string | null,
+  plan: SyncPlan,
+  onStatus: (message: string) => void,
+): Promise<{ payload: UploadPayload; sleepLoaded: boolean }> {
   const warnings: string[] = [];
-
-  report(onStatus, 'Setting the ring clock');
-  try {
-    await client.setTime(new Date());
-  } catch {
-    warnings.push('The ring clock was not updated.');
-    debugLog('The ring clock was not updated.');
-  }
-
-  report(onStatus, 'Reading battery');
-  const battery = await client.getBattery();
-  debugLog(`Battery ${battery.level}%${battery.charging ? ', charging' : ''}`);
-
-  const today = new Date();
-  const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-
-  report(onStatus, 'Reading heart rate');
-  const heartRate = [
-    ...(await client.getHeartRateLog(yesterday)),
-    ...(await client.getHeartRateLog(today)),
-  ];
-
-  report(onStatus, 'Reading steps');
-  const steps = [...(await client.getSteps(1)), ...(await client.getSteps(0))];
-
-  report(onStatus, 'Reading sleep');
+  let battery: UploadPayload['battery'] = null;
+  let heartRate: UploadPayload['heartRate'] = [];
+  let steps: UploadPayload['steps'] = [];
   let sleep: UploadPayload['sleep'] = [];
-  try {
-    sleep = await client.getSleep(today);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'The ring did not return sleep.';
-    warnings.push(message);
-    debugLog(message);
+  let sleepLoaded = false;
+  let realtimeHeartRate: number | null = null;
+  let spo2: number | null = null;
+  let bodyTemperatureC: number | null = null;
+
+  if (plan.logs) {
+    report(onStatus, 'Setting the ring clock');
+    try {
+      await client.setTime(new Date());
+    } catch {
+      warnings.push('The ring clock was not updated.');
+      debugLog('The ring clock was not updated.');
+    }
+
+    report(onStatus, 'Reading battery');
+    battery = await client.getBattery();
+    debugLog(`Battery ${battery.level}%${battery.charging ? ', charging' : ''}`);
+
+    const today = new Date();
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+
+    report(onStatus, 'Reading heart rate');
+    heartRate = [...(await client.getHeartRateLog(yesterday)), ...(await client.getHeartRateLog(today))];
+
+    report(onStatus, 'Reading steps');
+    steps = [...(await client.getSteps(1)), ...(await client.getSteps(0))];
   }
 
-  debugLog(`Heart-rate samples ${heartRate.length}, step samples ${steps.length}, sleep nights ${sleep.length}`);
+  if (plan.vitals) {
+    const vitals = await readVitals(client, 'all', onStatus);
+    realtimeHeartRate = vitals.realtimeHeartRate;
+    spo2 = vitals.spo2;
+    bodyTemperatureC = vitals.bodyTemperatureC;
+    warnings.push(...vitals.warnings);
+    if (!battery) {
+      try {
+        battery = await client.getBattery();
+      } catch {
+        battery = null;
+      }
+    }
+  }
+
+  if (plan.sleep) {
+    report(onStatus, 'Reading sleep');
+    try {
+      sleep = await client.getSleep(new Date());
+      sleepLoaded = true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The ring did not return sleep.';
+      warnings.push(message);
+      debugLog(message);
+    }
+  }
+
+  debugLog(
+    `Heart-rate samples ${heartRate.length}, step samples ${steps.length}, sleep nights ${sleep.length}`,
+  );
   if (warnings.length > 0) debugLog(warnings.join(' '));
 
   return {
-    source: 'colmi-r09',
-    syncedAt: new Date().toISOString(),
-    ring: { id: ringId, name: ringName },
-    battery,
-    realtimeHeartRate: null,
-    spo2: null,
-    bodyTemperatureC: null,
-    accelerometer: null,
-    heartRate,
-    steps,
-    sleep,
-    warnings,
+    sleepLoaded,
+    payload: readingPayload(ringId, ringName, {
+      battery,
+      realtimeHeartRate,
+      spo2,
+      bodyTemperatureC,
+      heartRate,
+      steps,
+      sleep,
+      warnings,
+    }),
   };
 }
 
@@ -99,6 +135,30 @@ export async function scanRing(
 ): Promise<UploadPayload> {
   report(onStatus, hasOpenRing(ringId) ? 'Using the open connection' : 'Connecting to the ring');
   const client = await openRing(ringId);
+  const vitals = await readVitals(client, kind, onStatus);
+  let battery = null;
+  try {
+    battery = await client.getBattery();
+  } catch {
+    battery = null;
+  }
+
+  if (vitals.warnings.length > 0) debugLog(vitals.warnings.join(' '));
+
+  return readingPayload(ringId, ringName, {
+    battery,
+    realtimeHeartRate: vitals.realtimeHeartRate,
+    spo2: vitals.spo2,
+    bodyTemperatureC: vitals.bodyTemperatureC,
+    warnings: vitals.warnings,
+  });
+}
+
+async function readVitals(
+  client: RingClient,
+  kind: ScanKind,
+  onStatus: (message: string) => void,
+): Promise<Pick<UploadPayload, 'realtimeHeartRate' | 'spo2' | 'bodyTemperatureC' | 'warnings'>> {
   const warnings: string[] = [];
   let realtimeHeartRate: number | null = null;
   let spo2: number | null = null;
@@ -137,22 +197,7 @@ export async function scanRing(
     else debugLog(`Body temperature ${bodyTemperatureC}°C`);
   }
 
-  let battery = null;
-  try {
-    battery = await client.getBattery();
-  } catch {
-    battery = null;
-  }
-
-  if (warnings.length > 0) debugLog(warnings.join(' '));
-
-  return readingPayload(ringId, ringName, {
-    battery,
-    realtimeHeartRate,
-    spo2,
-    bodyTemperatureC,
-    warnings,
-  });
+  return { realtimeHeartRate, spo2, bodyTemperatureC, warnings };
 }
 
 function delay(ms: number): Promise<void> {

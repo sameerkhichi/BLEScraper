@@ -80,9 +80,13 @@ Any HTTP status from 200 through 299 removes that reading from the phone queue. 
 
 The ring clock is set to UTC on each sync. Heart-rate history is 5-minute samples. Step history is 15-minute blocks. A sync reads yesterday and today. "Measure heart rate" takes a live reading and sends that on its own.
 
+Automatic sync
+--------------
+
+With a ring selected, the phone checks on its own. Steps and stored heart rate are read every 15 minutes. Live heart rate, blood oxygen, and body temperature are read every 30 minutes because those turn the ring lights on. Sleep is included about every 6 hours. Bluetooth disconnects when the check finishes.
+
+The check also runs when you open the app, and the system can run it after you leave or lock the phone. iOS chooses that timing and often waits longer than 15 minutes. Android shows a notification only during a check so the read can finish if the screen locks. Turn it off under Settings, Keep syncing.
+
+This needs a new development or TestFlight build. Background Bluetooth and the scheduler are native, so Expo Go cannot run them.
+
 The GATT service is 6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E. Writes go to 6E400002 and notifications come from 6E400003. Packets are 16 bytes. No pairing step.
-
-Not in this first slice
------------------------
-
-Background sync while the app is closed. iOS limits that, and the current build only syncs while the app is open. The upload queue is the piece that survives a dropped network.
