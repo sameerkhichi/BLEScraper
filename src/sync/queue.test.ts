@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { mergeReadings, type UploadPayload } from '../model';
+import { keepStoredSamples, mergeReadings, type UploadPayload } from '../model';
 import { enqueue, flushQueue } from './queue';
 
 function sample(bpm: number): UploadPayload {
@@ -13,6 +13,7 @@ function sample(bpm: number): UploadPayload {
     realtimeHeartRate: bpm,
     spo2: null,
     bodyTemperatureC: null,
+    vitalSpots: [],
     accelerometer: null,
     heartRate: [],
     steps: [],
@@ -49,6 +50,40 @@ test('a blood-oxygen reading keeps the last heart rate', () => {
   assert.equal(merged.realtimeHeartRate, 72);
   assert.equal(merged.spo2, 98);
   assert.equal(merged.syncedAt, '2026-11-06T00:01:00.000Z');
+});
+
+test('a later download keeps older stored samples and updates the same minute', () => {
+  const previous = sample(70);
+  previous.heartRate = [{ timestamp: '2026-11-05T12:00:00.000Z', bpm: 60 }];
+  previous.steps = [{ timestamp: '2026-11-05T12:00:00.000Z', steps: 10, calories: 1, distanceMeters: 8 }];
+  const next = sample(72);
+  next.heartRate = [{ timestamp: '2026-11-06T12:00:00.000Z', bpm: 80 }];
+  next.steps = [{ timestamp: '2026-11-05T12:00:00.000Z', steps: 25, calories: 2, distanceMeters: 18 }];
+
+  const merged = keepStoredSamples(previous, next);
+  assert.deepEqual(
+    merged.heartRate.map((sample) => sample.bpm),
+    [60, 80],
+  );
+  assert.equal(merged.steps.length, 1);
+  assert.equal(merged.steps[0].steps, 25);
+});
+
+test('vital spots accumulate by timestamp and drop after 10 days', () => {
+  const now = Date.parse('2026-11-06T12:00:00.000Z');
+  const previous = sample(70);
+  previous.vitalSpots = [
+    { timestamp: '2026-10-26T12:00:00.000Z', spo2: 97, bodyTemperatureC: 36.4 },
+    { timestamp: '2026-11-05T12:00:00.000Z', spo2: 98, bodyTemperatureC: 36.5 },
+  ];
+  const next = sample(72);
+  next.vitalSpots = [{ timestamp: '2026-11-06T12:00:00.000Z', spo2: 99, bodyTemperatureC: 36.6 }];
+
+  const merged = keepStoredSamples(previous, next, now);
+  assert.deepEqual(
+    merged.vitalSpots.map((spot) => spot.spo2),
+    [98, 99],
+  );
 });
 
 test('a live reading keeps the last sleep night and a sync replaces it', () => {

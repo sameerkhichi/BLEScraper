@@ -16,6 +16,12 @@ export const SLEEP_INTERVAL_MS = SLEEP_HOURS * 60 * 60 * 1000;
 export const RETRY_INTERVAL_MS = RETRY_MINUTES * 60 * 1000;
 export const UNWORN_INTERVAL_MS = HISTORY_INTERVAL_MS;
 export const UPLOAD_INTERVAL_MS = 60 * 60 * 1000;
+// iOS will not keep a 15-minute timer alive after the app is suspended.
+// A wake every 8 hours is the cadence it will actually schedule, about two or three times a day.
+export const CATCHUP_HOURS = 8;
+export const CATCHUP_INTERVAL_MINUTES = CATCHUP_HOURS * 60;
+// The ring keeps about a week. One wake can still recover a missed day.
+export const STORED_DAYS = 7;
 
 export type SyncPlan = {
   logs: boolean;
@@ -97,6 +103,7 @@ function snapshot(payload: UploadPayload): string {
     realtimeHeartRate: payload.realtimeHeartRate,
     spo2: payload.spo2,
     bodyTemperatureC: payload.bodyTemperatureC,
+    vitalSpots: payload.vitalSpots ?? [],
     heartRate: payload.heartRate,
     steps: payload.steps,
     sleep: payload.sleep,

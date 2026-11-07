@@ -24,6 +24,7 @@ function payload(patch: Partial<UploadPayload> = {}): UploadPayload {
     realtimeHeartRate: 60,
     spo2: 98,
     bodyTemperatureC: 36.5,
+    vitalSpots: [],
     accelerometer: null,
     heartRate: [{ timestamp: '2026-11-06T12:00:00.000Z', bpm: 60 }],
     steps: [{ timestamp: '2026-11-06T12:00:00.000Z', steps: 10, calories: 1, distanceMeters: 8 }],
@@ -149,4 +150,13 @@ test('an unchanged syncedAt does not count as a new reading', () => {
   assert.equal(readingChanged(previous, next), false);
   assert.equal(readingChanged(previous, payload({ steps: [{ timestamp: '2026-11-06T12:15:00.000Z', steps: 40, calories: 3, distanceMeters: 30 }] })), true);
   assert.equal(readingChanged(null, previous), true);
+});
+
+test('a new blood-oxygen spot counts as a new reading', () => {
+  const previous = payload();
+  const next = payload({
+    spo2: 98,
+    vitalSpots: [{ timestamp: '2026-11-06T20:00:00.000Z', spo2: 98, bodyTemperatureC: 36.6 }],
+  });
+  assert.equal(readingChanged(previous, next), true);
 });

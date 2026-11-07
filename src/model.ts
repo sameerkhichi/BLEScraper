@@ -16,6 +16,16 @@ export type HeartRateSample = {
   bpm: number;
 };
 
+export type VitalSpot = {
+  timestamp: string;
+  spo2: number | null;
+  bodyTemperatureC: number | null;
+};
+
+// The ring does not keep these. The phone remembers each wake's spot long enough
+// for a later snapshot to still include it.
+export const VITAL_SPOT_RETAIN_MS = 10 * 24 * 60 * 60 * 1000;
+
 export type StepSample = {
   timestamp: string;
   steps: number;
@@ -78,6 +88,7 @@ export type UploadPayload = {
   realtimeHeartRate: number | null;
   spo2: number | null;
   bodyTemperatureC: number | null;
+  vitalSpots: VitalSpot[];
   accelerometer: AccelSample | null;
   heartRate: HeartRateSample[];
   steps: StepSample[];
@@ -109,6 +120,62 @@ export function isSleepNight(value: unknown): value is SleepNight {
   );
 }
 
+export function vitalSpot(
+  spo2: number | null,
+  bodyTemperatureC: number | null,
+  timestamp = new Date().toISOString(),
+): VitalSpot | null {
+  if (typeof spo2 !== 'number' && typeof bodyTemperatureC !== 'number') return null;
+  return { timestamp, spo2, bodyTemperatureC };
+}
+
+export function isVitalSpot(value: unknown): value is VitalSpot {
+  if (!value || typeof value !== 'object') return false;
+  const spot = value as VitalSpot;
+  const spo2 = spot.spo2 === null || typeof spot.spo2 === 'number';
+  const temperature = spot.bodyTemperatureC === null || typeof spot.bodyTemperatureC === 'number';
+  return (
+    typeof spot.timestamp === 'string' &&
+    Number.isFinite(Date.parse(spot.timestamp)) &&
+    spo2 &&
+    temperature &&
+    (typeof spot.spo2 === 'number' || typeof spot.bodyTemperatureC === 'number')
+  );
+}
+
+export function keepStoredSamples(
+  previous: UploadPayload | null,
+  next: UploadPayload,
+  now = Date.now(),
+): UploadPayload {
+  const vitalSpots = pruneVitalSpots(
+    previous ? unionByTimestamp(previous.vitalSpots ?? [], next.vitalSpots ?? []) : (next.vitalSpots ?? []),
+    now,
+  );
+  if (!previous) return { ...next, vitalSpots };
+  return {
+    ...next,
+    heartRate: unionByTimestamp(previous.heartRate, next.heartRate),
+    steps: unionByTimestamp(previous.steps, next.steps),
+    vitalSpots,
+  };
+}
+
+function pruneVitalSpots(spots: VitalSpot[], now: number): VitalSpot[] {
+  const cutoff = now - VITAL_SPOT_RETAIN_MS;
+  return spots.filter((spot) => {
+    const time = Date.parse(spot.timestamp);
+    return Number.isFinite(time) && time >= cutoff;
+  });
+}
+
+function unionByTimestamp<T extends { timestamp: string }>(previous: T[], next: T[]): T[] {
+  const byTime = new Map<string, T>();
+  for (const sample of previous) byTime.set(sample.timestamp, sample);
+  for (const sample of next) byTime.set(sample.timestamp, sample);
+  return [...byTime.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+}
+
 export function mergeReadings(
   previous: UploadPayload | null,
   next: UploadPayload,
@@ -121,6 +188,7 @@ export function mergeReadings(
     realtimeHeartRate: next.realtimeHeartRate ?? previous.realtimeHeartRate,
     spo2: next.spo2 ?? previous.spo2,
     bodyTemperatureC: next.bodyTemperatureC ?? previous.bodyTemperatureC,
+    vitalSpots: pruneVitalSpots(unionByTimestamp(previous.vitalSpots ?? [], next.vitalSpots ?? []), Date.now()),
     accelerometer: next.accelerometer ?? previous.accelerometer,
     heartRate: keepHistory ? previous.heartRate : next.heartRate,
     steps: keepHistory ? previous.steps : next.steps,

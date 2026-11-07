@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { defaultSettings, isAccelSample, isSleepNight, type AppSettings, type UploadPayload } from '../model';
+import { defaultSettings, isAccelSample, isSleepNight, isVitalSpot, type AppSettings, type UploadPayload } from '../model';
 import type { PendingUpload } from './queue';
 import { emptyAutoSyncState, type AutoSyncState } from './schedule';
 
@@ -45,6 +45,7 @@ export async function loadLastPayload(): Promise<UploadPayload | null> {
     ...parsed,
     spo2: typeof parsed.spo2 === 'number' ? parsed.spo2 : null,
     bodyTemperatureC: typeof parsed.bodyTemperatureC === 'number' ? parsed.bodyTemperatureC : null,
+    vitalSpots: Array.isArray(parsed.vitalSpots) ? parsed.vitalSpots.filter(isVitalSpot) : [],
     accelerometer: isAccelSample(parsed.accelerometer) ? parsed.accelerometer : null,
     sleep: Array.isArray(parsed.sleep) ? parsed.sleep.filter(isSleepNight) : [],
   };

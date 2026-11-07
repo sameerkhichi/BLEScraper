@@ -4,7 +4,7 @@ import { AppState } from 'react-native';
 import { closeRing } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
-import { mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
+import { keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
@@ -259,7 +259,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
           collected.sleepLoaded || !previous
             ? collected.payload
             : { ...collected.payload, sleep: previous.sleep };
-        const merged = mergeReadings(previous, payload, false);
+        const merged = keepStoredSamples(previous, mergeReadings(previous, payload, false));
         await remember(merged);
         const nextQueue = enqueue(storedQueue, payload);
         await publishQueue(nextQueue);

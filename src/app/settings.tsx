@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { Button, colors } from '../components/ui';
-import { HISTORY_MINUTES, SLEEP_HOURS, VITALS_MINUTES } from '../sync/schedule';
+import { CATCHUP_HOURS, HISTORY_MINUTES, VITALS_MINUTES } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 export default function SettingsScreen() {
@@ -43,9 +43,9 @@ export default function SettingsScreen() {
           <View style={styles.rowText}>
             <Text style={styles.label}>Keep syncing</Text>
             <Text style={styles.body}>
-              Steps and stored heart rate every {HISTORY_MINUTES} minutes. Live heart rate, SpO2, and temperature every {VITALS_MINUTES} minutes.
-              Sleep about every {SLEEP_HOURS} hours. The phone disconnects after each check. iOS may wait longer once the app is closed.
-              Android shows a notification only while a check is running.
+              While this screen is open, steps and stored heart rate are read every {HISTORY_MINUTES} minutes. Live heart rate, SpO2, and temperature run every {VITALS_MINUTES} minutes.
+              About every {CATCHUP_HOURS} hours the phone wakes on its own, downloads the stored record, and if the ring is being worn takes one blood-oxygen and temperature reading. Then it sends and disconnects. It does not need to stay open. Sleep is included.
+              iOS chooses the wake time and will not wake the app after you swipe it away. Android shows a notification only while a download is running.
             </Text>
           </View>
           <Switch

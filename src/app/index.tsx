@@ -284,9 +284,11 @@ export default function HomeScreen() {
         </Card>
 
         <Button disabled={busy} label="Sync ring" onPress={syncRing} />
-        {settings.autoSync ? null : (
-          <Text style={styles.meta}>Automatic sync is off. Turn it on in Settings.</Text>
-        )}
+        <Text style={styles.meta}>
+          {settings.autoSync
+            ? 'The phone wakes a couple of times a day, downloads the stored record, takes blood oxygen and temperature when the ring is being worn, sends them, and disconnects.'
+            : 'Automatic download is off. Turn it on in API settings.'}
+        </Text>
 
         <Card>
           <Text style={styles.label}>Status</Text>

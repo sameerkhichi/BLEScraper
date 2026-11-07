@@ -4,8 +4,8 @@ import { Platform } from 'react-native';
 
 import { debugLog } from '../ble/debugLog';
 import { closeRing } from '../ble/ringClient';
-import { runAutoSync } from './autoSync';
-import { HISTORY_MINUTES } from './schedule';
+import { runCatchUp } from './autoSync';
+import { CATCHUP_HOURS, CATCHUP_INTERVAL_MINUTES } from './schedule';
 
 export const AUTO_SYNC_TASK = 'blescraper-auto-sync';
 
@@ -15,7 +15,7 @@ let expirationBound = false;
 if (Platform.OS !== 'web') {
   TaskManager.defineTask(AUTO_SYNC_TASK, async () => {
     try {
-      await runAutoSync({ allowAndroidService: false });
+      await runCatchUp();
       return BackgroundTask.BackgroundTaskResult.Success;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Background sync failed.';
@@ -49,10 +49,9 @@ export async function syncBackgroundRegistration(enabled: boolean): Promise<void
       debugLog('Background sync is not available on this device.');
       return;
     }
-    if (!registered) {
-      await BackgroundTask.registerTaskAsync(AUTO_SYNC_TASK, { minimumInterval: HISTORY_MINUTES });
-      debugLog(`Background sync registered, about every ${HISTORY_MINUTES} minutes.`);
-    }
+    if (registered) await BackgroundTask.unregisterTaskAsync(AUTO_SYNC_TASK);
+    await BackgroundTask.registerTaskAsync(AUTO_SYNC_TASK, { minimumInterval: CATCHUP_INTERVAL_MINUTES });
+    debugLog(`Background download registered, about every ${CATCHUP_HOURS} hours.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not register background sync.';
     debugLog(message);

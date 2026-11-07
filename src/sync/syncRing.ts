@@ -1,7 +1,7 @@
 import { hasOpenRing, openRing, type RingClient } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
-import type { ScanKind, UploadPayload } from '../model';
-import type { SyncPlan } from './schedule';
+import { vitalSpot, type ScanKind, type UploadPayload, type VitalSpot } from '../model';
+import { STORED_DAYS, type SyncPlan } from './schedule';
 
 function report(onStatus: (message: string) => void, message: string): void {
   debugLog(message);
@@ -30,6 +30,7 @@ export async function collectRing(
   ringName: string | null,
   plan: SyncPlan,
   onStatus: (message: string) => void,
+  options?: { probeWear?: boolean; historyDays?: number },
 ): Promise<RingRead> {
   const warnings: string[] = [];
   let battery: UploadPayload['battery'] = null;
@@ -40,19 +41,24 @@ export async function collectRing(
   let realtimeHeartRate: number | null = null;
   let spo2: number | null = null;
   let bodyTemperatureC: number | null = null;
+  let vitalSpots: VitalSpot[] = [];
 
-  report(onStatus, 'Checking that the ring is being worn');
-  const wear = await client.checkWorn();
-  if (!wear.wearing && wear.reportedOff) {
-    report(onStatus, wear.reason);
-    return {
-      worn: false,
-      sleepLoaded: false,
-      payload: readingPayload(ringId, ringName, { warnings: [wear.reason] }),
-    };
+  const probeWear = options?.probeWear !== false;
+  let knownHeartRate: number | null = null;
+  if (probeWear) {
+    report(onStatus, 'Checking that the ring is being worn');
+    const wear = await client.checkWorn();
+    if (!wear.wearing && wear.reportedOff) {
+      report(onStatus, wear.reason);
+      return {
+        worn: false,
+        sleepLoaded: false,
+        payload: readingPayload(ringId, ringName, { warnings: [wear.reason] }),
+      };
+    }
+    knownHeartRate = wear.wearing ? wear.bpm : null;
+    realtimeHeartRate = knownHeartRate;
   }
-  const knownHeartRate = wear.wearing ? wear.bpm : null;
-  realtimeHeartRate = knownHeartRate;
 
   if (plan.logs) {
     report(onStatus, 'Setting the ring clock');
@@ -67,14 +73,25 @@ export async function collectRing(
     battery = await client.getBattery();
     debugLog(`Battery ${battery.level}%${battery.charging ? ', charging' : ''}`);
 
-    const today = new Date();
-    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-
-    report(onStatus, 'Reading heart rate');
-    heartRate = [...(await client.getHeartRateLog(yesterday)), ...(await client.getHeartRateLog(today))];
-
-    report(onStatus, 'Reading steps');
-    steps = [...(await client.getSteps(1)), ...(await client.getSteps(0))];
+    const historyDays = Math.min(Math.max(options?.historyDays ?? 2, 1), STORED_DAYS);
+    report(onStatus, 'Reading stored heart rate and steps');
+    for (let daysAgo = historyDays - 1; daysAgo >= 0; daysAgo -= 1) {
+      const day = new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000);
+      try {
+        heartRate.push(...(await client.getHeartRateLog(day)));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'The ring did not return heart rate.';
+        warnings.push(message);
+        debugLog(message);
+      }
+      try {
+        steps.push(...(await client.getSteps(daysAgo)));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'The ring did not return steps.';
+        warnings.push(message);
+        debugLog(message);
+      }
+    }
   }
 
   if (plan.vitals) {
@@ -83,6 +100,8 @@ export async function collectRing(
     spo2 = vitals.spo2;
     bodyTemperatureC = vitals.bodyTemperatureC;
     warnings.push(...vitals.warnings);
+    const spot = vitalSpot(spo2, bodyTemperatureC);
+    if (spot) vitalSpots = [spot];
     if (!battery) {
       try {
         battery = await client.getBattery();
@@ -117,6 +136,7 @@ export async function collectRing(
       realtimeHeartRate,
       spo2,
       bodyTemperatureC,
+      vitalSpots,
       heartRate,
       steps,
       sleep,
@@ -137,6 +157,7 @@ export function readingPayload(
     realtimeHeartRate: null,
     spo2: null,
     bodyTemperatureC: null,
+    vitalSpots: [],
     accelerometer: null,
     heartRate: [],
     steps: [],
@@ -183,14 +204,69 @@ export async function scanRing(
       realtimeHeartRate: vitals.realtimeHeartRate ?? (wear.wearing ? wear.bpm : null),
       spo2: vitals.spo2,
       bodyTemperatureC: vitals.bodyTemperatureC,
+      vitalSpots: spotList(vitals.spo2, vitals.bodyTemperatureC),
       warnings: vitals.warnings,
     }),
   };
 }
 
+export type WornSpots = {
+  realtimeHeartRate: number | null;
+  spo2: number | null;
+  bodyTemperatureC: number | null;
+  vitalSpots: VitalSpot[];
+  warnings: string[];
+};
+
+export async function measureWornSpots(
+  client: RingClient,
+  onStatus: (message: string) => void,
+): Promise<WornSpots> {
+  report(onStatus, 'Checking that the ring is being worn');
+  try {
+    const wear = await client.checkWorn();
+    if (!wear.wearing) {
+      debugLog(wear.reason);
+      return emptySpots();
+    }
+    const vitals = await readVitals(client, 'spots', onStatus, wear.bpm);
+    return {
+      realtimeHeartRate: vitals.realtimeHeartRate ?? wear.bpm,
+      spo2: vitals.spo2,
+      bodyTemperatureC: vitals.bodyTemperatureC,
+      vitalSpots: spotList(vitals.spo2, vitals.bodyTemperatureC),
+      warnings: vitals.warnings,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Blood oxygen and temperature were not read.';
+    debugLog(message);
+    return emptySpots([message]);
+  }
+}
+
+export function applyWornSpots(payload: UploadPayload, spots: WornSpots): UploadPayload {
+  return {
+    ...payload,
+    realtimeHeartRate: spots.realtimeHeartRate ?? payload.realtimeHeartRate,
+    spo2: spots.spo2 ?? payload.spo2,
+    bodyTemperatureC: spots.bodyTemperatureC ?? payload.bodyTemperatureC,
+    vitalSpots: spots.vitalSpots.length > 0 ? spots.vitalSpots : payload.vitalSpots,
+    warnings: spots.warnings.length > 0 ? [...payload.warnings, ...spots.warnings] : payload.warnings,
+  };
+}
+
+function emptySpots(warnings: string[] = []): WornSpots {
+  return { realtimeHeartRate: null, spo2: null, bodyTemperatureC: null, vitalSpots: [], warnings };
+}
+
+function spotList(spo2: number | null, bodyTemperatureC: number | null): VitalSpot[] {
+  const spot = vitalSpot(spo2, bodyTemperatureC);
+  return spot ? [spot] : [];
+}
+
 async function readVitals(
   client: RingClient,
-  kind: ScanKind,
+  kind: ScanKind | 'spots',
   onStatus: (message: string) => void,
   knownHeartRate: number | null = null,
 ): Promise<Pick<UploadPayload, 'realtimeHeartRate' | 'spo2' | 'bodyTemperatureC' | 'warnings'>> {
@@ -200,8 +276,8 @@ async function readVitals(
   let bodyTemperatureC: number | null = null;
 
   const wantHeart = kind === 'heart-rate' || kind === 'all';
-  const wantOxygen = kind === 'spo2' || kind === 'all';
-  const wantTemperature = kind === 'temperature' || kind === 'all';
+  const wantOxygen = kind === 'spo2' || kind === 'all' || kind === 'spots';
+  const wantTemperature = kind === 'temperature' || kind === 'all' || kind === 'spots';
 
   if (wantHeart) {
     if (knownHeartRate !== null) {
@@ -224,17 +300,29 @@ async function readVitals(
   if (wantOxygen) {
     if (wantHeart) await delay(400);
     report(onStatus, 'Measuring blood oxygen');
-    spo2 = await client.measureBloodOxygen();
-    if (spo2 === null) warnings.push('The ring did not return a blood-oxygen reading.');
-    else debugLog(`Blood oxygen ${spo2}%`);
+    try {
+      spo2 = await client.measureBloodOxygen();
+      if (spo2 === null) warnings.push('The ring did not return a blood-oxygen reading.');
+      else debugLog(`Blood oxygen ${spo2}%`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The ring did not return a blood-oxygen reading.';
+      warnings.push(message);
+      debugLog(message);
+    }
   }
 
   if (wantTemperature) {
     if (wantHeart || wantOxygen) await delay(400);
     report(onStatus, 'Measuring body temperature');
-    bodyTemperatureC = await client.measureBodyTemperature();
-    if (bodyTemperatureC === null) warnings.push('The ring did not return a body-temperature reading.');
-    else debugLog(`Body temperature ${bodyTemperatureC}°C`);
+    try {
+      bodyTemperatureC = await client.measureBodyTemperature();
+      if (bodyTemperatureC === null) warnings.push('The ring did not return a body-temperature reading.');
+      else debugLog(`Body temperature ${bodyTemperatureC}°C`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'The ring did not return a body-temperature reading.';
+      warnings.push(message);
+      debugLog(message);
+    }
   }
 
   return { realtimeHeartRate, spo2, bodyTemperatureC, warnings };

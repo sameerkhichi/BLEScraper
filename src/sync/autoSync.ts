@@ -3,7 +3,7 @@ import { Platform } from 'react-native';
 import { holdAndroidRadio, releaseAndroidRadio } from '../ble/androidRadio';
 import { debugLog } from '../ble/debugLog';
 import { closeRing, openRing } from '../ble/ringClient';
-import { mergeReadings, type AppSettings, type UploadPayload } from '../model';
+import { keepStoredSamples, mergeReadings, type AppSettings, type UploadPayload } from '../model';
 import { enqueue, flushQueue } from './queue';
 import { autoSyncPaused, runWithQueue, runWithRing } from './ringGate';
 import {
@@ -12,6 +12,7 @@ import {
   HISTORY_INTERVAL_MS,
   readingChanged,
   shouldSync,
+  STORED_DAYS,
   type AutoSyncState,
   type SyncPlan,
 } from './schedule';
@@ -24,7 +25,7 @@ import {
   saveLastPayload,
   saveQueue,
 } from './storage';
-import { collectRing } from './syncRing';
+import { applyWornSpots, collectRing, measureWornSpots } from './syncRing';
 import { postPayload } from './upload';
 
 const PAUSED_WAIT_MS = 30 * 1000;
@@ -74,6 +75,84 @@ export async function markRingAsleep(): Promise<number> {
 export async function markUploadAttempted(): Promise<void> {
   const state = await loadAutoSyncState();
   await saveAutoSyncState({ ...state, uploadAt: new Date().toISOString() });
+}
+
+export async function runCatchUp(): Promise<AutoSyncResult> {
+  if (Platform.OS === 'web') return idle(HISTORY_INTERVAL_MS);
+  if (autoSyncPaused()) return idle(PAUSED_WAIT_MS);
+
+  const settings = await loadSettings();
+  if (!settings.autoSync || !settings.ringId) return idle(HISTORY_INTERVAL_MS);
+
+  return runWithRing(async () => {
+    const current = await loadSettings();
+    if (!current.autoSync || !current.ringId || autoSyncPaused()) return idle(PAUSED_WAIT_MS);
+
+    let radioHeld = false;
+    try {
+      try {
+        await holdAndroidRadio();
+        radioHeld = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'could not keep Bluetooth awake';
+        debugLog(message);
+      }
+
+      report('Waking to download the ring record');
+      const client = await openRing(current.ringId);
+      const collected = await collectRing(
+        client,
+        current.ringId,
+        current.ringName,
+        { logs: true, vitals: false, sleep: true },
+        report,
+        { probeWear: false, historyDays: STORED_DAYS },
+      );
+      let downloaded = collected.payload;
+      try {
+        downloaded = applyWornSpots(collected.payload, await measureWornSpots(client, report));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Blood oxygen and temperature were not read.';
+        debugLog(message);
+      }
+      await closeRing();
+      if (radioHeld) {
+        radioHeld = false;
+        await releaseAndroidRadio();
+      }
+
+      return await runWithQueue(async () => {
+        const previous = await loadLastPayload();
+        const merged = keepStoredSamples(
+          previous,
+          mergeReadings(previous, withSleep(previous, downloaded, collected.sleepLoaded), false),
+        );
+        merged.syncedAt = new Date().toISOString();
+        const changed = readingChanged(previous, merged);
+        const storedQueue = await loadQueue();
+        const nextQueue = changed ? enqueue(storedQueue, merged) : storedQueue;
+        await saveLastPayload(merged);
+        await saveQueue(nextQueue);
+        await markSyncCompleted({ logs: true, sleep: collected.sleepLoaded });
+        snapshotSink?.({ queue: nextQueue, lastPayload: merged });
+        const flushed = await flushQueueNow(current);
+        if (flushed) return flushed;
+        if (!current.apiUrl.trim()) {
+          return { outcome: 'saved' as const, waitMs: HISTORY_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' };
+        }
+        return { outcome: 'saved' as const, waitMs: HISTORY_INTERVAL_MS, message: 'Downloaded the ring record.' };
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Sync failed.';
+      debugLog(message);
+      const failed: AutoSyncState = { ...(await loadAutoSyncState()), failedAt: new Date().toISOString() };
+      await saveAutoSyncState(failed);
+      return { outcome: 'failed', waitMs: HISTORY_INTERVAL_MS, message };
+    } finally {
+      await closeRing();
+      if (radioHeld) await releaseAndroidRadio();
+    }
+  });
 }
 
 export async function runAutoSync(options: { allowAndroidService: boolean }): Promise<AutoSyncResult> {
@@ -148,7 +227,10 @@ export async function runAutoSync(options: { allowAndroidService: boolean }): Pr
 
       return await runWithQueue(async () => {
         const previous = await loadLastPayload();
-        const merged = mergeReadings(previous, withSleep(previous, collected.payload, collected.sleepLoaded), false);
+        const merged = keepStoredSamples(
+          previous,
+          mergeReadings(previous, withSleep(previous, collected.payload, collected.sleepLoaded), false),
+        );
         merged.syncedAt = new Date().toISOString();
         const changed = readingChanged(previous, merged);
         const storedQueue = await loadQueue();
@@ -234,6 +316,33 @@ function uploadDecision(
 function combineWait(ringWaitMs: number, uploadWaitMs: number | null): number {
   if (uploadWaitMs === null) return ringWaitMs;
   return Math.min(ringWaitMs, uploadWaitMs);
+}
+
+async function flushQueueNow(settings: AppSettings): Promise<AutoSyncResult | null> {
+  if (!settings.apiUrl.trim()) return null;
+  const queue = await loadQueue();
+  if (queue.length === 0) return null;
+
+  report('Sending to the API');
+  await markUploadAttempted();
+  const flushed = await flushQueue(queue, (body) => postPayload(settings, body));
+  await saveQueue(flushed.remaining);
+  snapshotSink?.({ queue: flushed.remaining, lastPayload: await loadLastPayload() });
+  if (flushed.error) {
+    return {
+      outcome: 'saved',
+      waitMs: HISTORY_INTERVAL_MS,
+      message:
+        flushed.sent > 0
+          ? `Sent ${flushed.sent}. ${flushed.remaining.length} still waiting. ${flushed.error}`
+          : `Waiting to send. ${flushed.error}`,
+    };
+  }
+  return {
+    outcome: 'synced',
+    waitMs: HISTORY_INTERVAL_MS,
+    message: flushed.sent > 0 ? 'Synced and sent.' : 'Nothing waiting to send.',
+  };
 }
 
 async function flushIfDue(settings: AppSettings): Promise<AutoSyncResult | null> {

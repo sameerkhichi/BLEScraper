@@ -24,7 +24,23 @@ Notes
 
 Automatic sync
 
-Steps and stored heart rate are read every 15 minutes. Live heart rate, SpO2, and body temperature are read every 30 minutes, on the same connection as a log refresh. Sleep is included about every 6 hours. The phone connects, reads, and disconnects. A manual sync still reads everything immediately. iOS may delay a check after the app is suspended. Android shows a notification only while a check is running.
+The phone does not have to stay open. About every 8 hours iOS or Android wakes the app, it connects, downloads the stored record, sends it, and disconnects. iOS picks the real time, usually a couple of windows a day, and it will not wake the app after it is swiped away. Opening the app again arms the next wake. Android shows a notification only while that download is running.
+
+That wake reads about 7 days of stored heart rate and steps, plus the sleep nights still on the ring. It still runs if the ring is on the table. One successful wake can recover a missed day.
+
+On that same wake the phone checks whether the ring is being worn. The heart-rate sensor comes on for that check. If the ring is being worn, it then takes one blood-oxygen reading and one body-temperature reading, and those lights stay on until each reading finishes. Each pair is saved with the time it was taken, in vitalSpots, and sent with the snapshot. If the ring is not being worn, those two are skipped. The ring does not store oxygen or temperature, so a wake cannot fill in the hours since the previous one. A phone that is powered off cannot take them either, because Bluetooth is off. The phone keeps about 10 days of these spots. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted.
+
+While the app is open, steps and stored heart rate are also read every 15 minutes. Live heart rate, SpO2, and body temperature are read every 30 minutes because those turn the lights on, and only when the ring is being worn. Those open-app readings are stored as vital spots too. A manual sync still reads immediately.
+
+Ring storage
+
+The R09 does not keep a month. The useful store is about a week: heart rate in 5-minute slots (288 a day), steps in 15-minute blocks (96 a day), and roughly a week of sleep nights. Days older than that come back empty. Live SpO2 and temperature are not part of that stored week. They exist only for the moment the lights are on, which is why a wake stores one spot instead of a full day. A full week of JSON is a few hundred kilobytes, not a large flash log. There is no published chip size worth planning around.
+
+Duplicates
+
+The phone already merges heart rate and steps by timestamp, so the saved reading does not grow duplicate minutes. The API still receives a whole snapshot whenever any sample is new, so the same minute can be posted again inside the next body.
+
+A month-long cache is not worth it. The ring cannot resend anything older than about a week, so a month of keys does not make the filter safer. If Solloid appends rows, send only timestamps that were not in the last successful upload, and remember those timestamps for about 10 days. If Solloid replaces a row by timestamp, the full snapshot is fine and the phone does not need a second cache.
 
 Sleep upload
 
@@ -40,8 +56,11 @@ The ring sends stages, not a score and not cycle numbers. Stage names are light,
   "ring": { "id": "AA:BB:CC:DD:EE:FF", "name": "R09" },
   "battery": { "level": 80, "charging": false },
   "realtimeHeartRate": null,
-  "spo2": null,
-  "bodyTemperatureC": null,
+  "spo2": 98,
+  "bodyTemperatureC": 36.6,
+  "vitalSpots": [
+    { "timestamp": "2026-11-06T15:04:00.000Z", "spo2": 98, "bodyTemperatureC": 36.6 }
+  ],
   "accelerometer": null,
   "heartRate": [{ "timestamp": "2026-11-06T04:00:00.000Z", "bpm": 54 }],
   "steps": [{ "timestamp": "2026-11-06T00:00:00.000Z", "steps": 0, "calories": 0, "distanceMeters": 0 }],

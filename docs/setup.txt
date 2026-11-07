@@ -71,6 +71,11 @@ POST the saved API URL with Content-Type application/json.
       "ring": { "id": "ios-peripheral-uuid", "name": "R09" },
       "battery": { "level": 64, "charging": false },
       "realtimeHeartRate": null,
+      "spo2": 98,
+      "bodyTemperatureC": 36.6,
+      "vitalSpots": [
+        { "timestamp": "2026-11-06T19:45:00.000Z", "spo2": 98, "bodyTemperatureC": 36.6 }
+      ],
       "heartRate": [{ "timestamp": "2026-11-06T19:40:00.000Z", "bpm": 72 }],
       "steps": [{ "timestamp": "2026-11-06T19:30:00.000Z", "steps": 120, "calories": 8, "distanceMeters": 90 }],
       "warnings": []
@@ -83,9 +88,11 @@ The ring clock is set to UTC on each sync. Heart-rate history is 5-minute sample
 Automatic sync
 --------------
 
-With a ring selected, the phone checks on its own. It first looks for a heart rate. If nobody is wearing the ring, it turns the sensor off and leaves the ring asleep until the next check. Steps and stored heart rate are read every 15 minutes. Live heart rate, blood oxygen, and body temperature are read every 30 minutes because those turn the ring lights on. Sleep is included about every 6 hours. Bluetooth disconnects when the check finishes.
+With a ring selected, the phone wakes about every 8 hours even when the screen is locked and the app is not on screen. It connects, downloads the heart-rate, step, and sleep record stored on the ring, sends it, and disconnects. If the ring is being worn, that wake also takes one blood-oxygen reading and one body-temperature reading, and the sensor lights come on. If it is not being worn, those two are skipped. The ring does not store them, so the hours since the last wake are not filled in. One wake reads about a week of the stored record, so a missed wake does not drop a day of heart rate, steps, or sleep.
 
-The check also runs when you open the app, and the system can run it after you leave or lock the phone. iOS chooses that timing and often waits longer than 15 minutes. Android shows a notification only during a check so the read can finish if the screen locks. Turn it off under Settings, Keep syncing.
+iOS chooses the actual time. It needs some battery and a network, and it will not wake the app after you swipe it away in the app switcher. Opening the app again arms the next wake. Android shows a notification only while a download is running.
+
+While the app is open, steps and stored heart rate are also read every 15 minutes. Live heart rate, blood oxygen, and temperature are read every 30 minutes because those turn the ring lights on, and only when the ring is being worn. Sleep is included about every 6 hours during an open session. Turn the wakes off under API settings, Keep syncing.
 
 This needs a new development or TestFlight build. Background Bluetooth and the scheduler are native, so Expo Go cannot run them.
 
