@@ -21,6 +21,7 @@ export const REALTIME_HEART_RATE_STREAM = 6;
 export const REALTIME_TEMPERATURE = 0x0b;
 
 const ACTION_START = 1;
+const ACTION_CONTINUE = 3;
 
 export type NoData = { kind: 'none' };
 
@@ -71,6 +72,20 @@ export function startRealtimePacket(readingType: number): Uint8Array {
 // Action 1 only produces an empty acknowledgement on this ring.
 export function startHeartRatePacket(): Uint8Array {
   return makePacket(CMD_START_REAL_TIME, [REALTIME_HEART_RATE, 0]);
+}
+
+// Keep the same measurement going. Sending start again resets it and the next number is less settled.
+export function continueHeartRatePacket(): Uint8Array {
+  return makePacket(CMD_START_REAL_TIME, [REALTIME_HEART_RATE, ACTION_CONTINUE]);
+}
+
+// The ring's first samples jump around. The middle of the latest few is the steadier pulse.
+export function smoothHeartRate(samples: number[]): number | null {
+  if (samples.length === 0) return null;
+  const sorted = [...samples].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[middle];
+  return Math.round((sorted[middle - 1] + sorted[middle]) / 2);
 }
 
 export function stopRealtimePacket(readingType: number): Uint8Array {

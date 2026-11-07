@@ -26,6 +26,7 @@ import {
   batteryPacket,
   bodyTemperatureCelsius,
   classifyWear,
+  continueHeartRatePacket,
   isPlausibleSpo2,
   parseBattery,
   parseLiveHeartRate,
@@ -35,6 +36,7 @@ import {
   readHeartRatePacket,
   readStepsPacket,
   setTimePacket,
+  smoothHeartRate,
   startHeartRatePacket,
   startRealtimePacket,
   stopRealtimePacket,
@@ -53,6 +55,8 @@ const SHORT_TIMEOUT_MS = 5000;
 const HEART_RATE_TIMEOUT_MS = 35000;
 // Long enough to see an off-finger packet. The heart-rate measurement waits on its own.
 const WEAR_PROBE_MS = 8000;
+// About as often as this ring can compute a new pulse. Faster requests restart the sensor.
+const HEART_RATE_POLL_MS = 1000;
 
 export const NOT_WORN_MESSAGE = 'Ring is not being worn. Leaving it asleep.';
 
@@ -347,52 +351,74 @@ export class RingClient {
 
   async watchHeartRate(onFrame: (frame: HeartRateFrame) => void): Promise<void> {
     return this.run(async () => {
+      let poll: ReturnType<typeof setInterval> | null = null;
       try {
         await new Promise<void>((resolve, reject) => {
           let settled = false;
+          let offTimer: ReturnType<typeof setTimeout> | null = null;
+          const clearOff = () => {
+            if (!offTimer) return;
+            clearTimeout(offTimer);
+            offTimer = null;
+          };
           const finish = () => {
             if (settled) return;
             settled = true;
+            if (poll) clearInterval(poll);
+            clearOff();
             this.heartStop = null;
             this.listeners.delete(CMD_START_REAL_TIME);
-            this.listeners.delete(CMD_RAW_SENSOR);
             this.aborts.delete(abort);
             resolve();
           };
           const abort = (error: Error) => {
             if (settled) return;
             settled = true;
+            if (poll) clearInterval(poll);
+            clearOff();
             this.heartStop = null;
             this.listeners.delete(CMD_START_REAL_TIME);
-            this.listeners.delete(CMD_RAW_SENSOR);
             this.aborts.delete(abort);
             reject(error);
           };
           this.aborts.add(abort);
           this.heartStop = finish;
+          let lastSampleAt = 0;
+          const recent: number[] = [];
           this.listeners.set(CMD_START_REAL_TIME, (packet) => {
             const bpm = parseLiveHeartRate(packet);
             if (bpm !== null) {
-              onFrame({ kind: 'bpm', bpm });
+              clearOff();
+              lastSampleAt = Date.now();
+              recent.push(bpm);
+              if (recent.length > 3) recent.shift();
+              const steady = smoothHeartRate(recent);
+              debugLog(`Heart rate ${bpm}`);
+              if (steady !== null) onFrame({ kind: 'bpm', bpm: steady });
               return;
             }
-            if (classifyWear(packet) === 'off') abort(new Error(NOT_WORN_MESSAGE));
+            if (classifyWear(packet) !== 'off') {
+              clearOff();
+              return;
+            }
+            // One status packet between samples is not the ring coming off the finger.
+            if (!offTimer) offTimer = setTimeout(() => abort(new Error(NOT_WORN_MESSAGE)), 3000);
           });
-          this.listeners.set(CMD_RAW_SENSOR, (packet) => {
-            const frame = parseRawSensor(packet);
-            if (frame?.kind === 'ppg') onFrame({ kind: 'ppg', value: frame.value });
-          });
-          this.send(startHeartRatePacket())
-            .then(() => this.send(rawSensorPacket(RAW_SENSOR_ENABLE)))
-            .catch(abort);
+          const ask = () => {
+            if (settled) return;
+            const fresh = lastSampleAt === 0 || Date.now() - lastSampleAt > 4000;
+            this.send(fresh ? startHeartRatePacket() : continueHeartRatePacket()).catch(() => undefined);
+          };
+          ask();
+          poll = setInterval(ask, HEART_RATE_POLL_MS);
         });
       } finally {
+        if (poll) clearInterval(poll);
         try {
           await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
         } catch {
           // The stop command can fail after the ring has already ended the reading.
         }
-        await this.stopRawSensors();
       }
     });
   }

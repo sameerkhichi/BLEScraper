@@ -1,4 +1,5 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import type { SleepNight, SleepStageName, StepSample } from '../model';
 import { colors } from './ui';
@@ -7,7 +8,7 @@ const COLD = '#6ea8ff';
 const WARN = '#f0c36a';
 const TEMP_MIN = 35;
 const TEMP_MAX = 40;
-const TRACE_HEIGHT = 76;
+const CHART_HEIGHT = 112;
 
 const stageColor: Record<SleepStageName, string> = {
   light: '#7fbf8a',
@@ -99,32 +100,131 @@ export function ActivityChart({ steps }: { steps: StepSample[] }) {
   );
 }
 
-export function HeartRateChart({ bpm, wave }: { bpm: number | null; wave: number[] }) {
+export function HeartRateChart({
+  bpm,
+  points,
+  live,
+}: {
+  bpm: number | null;
+  points: number[];
+  live: boolean;
+}) {
   return (
-    <View style={styles.heartRow}>
-      <View>
-        <Text style={styles.vitalValue}>{bpm == null ? '—' : `${bpm}`}</Text>
-        <Text style={styles.meta}>bpm</Text>
+    <View style={styles.heartBlock}>
+      <View style={styles.heartReadout}>
+        <PulsingHeart bpm={live ? bpm : null} />
+        <View>
+          <Text style={styles.vitalValue}>{bpm == null ? '—' : `${bpm}`}</Text>
+          <Text style={styles.meta}>bpm</Text>
+        </View>
       </View>
-      <View style={styles.sparkWrap}>
-        {wave.length < 2 ? <Text style={styles.meta}>Measure to watch the pulse.</Text> : <PulseTrace values={wave} />}
-      </View>
+      {points.length === 0 ? (
+        <Text style={styles.meta}>Measure to draw your heart rate.</Text>
+      ) : (
+        <BpmLine points={points} />
+      )}
     </View>
   );
 }
 
-function PulseTrace({ values }: { values: number[] }) {
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = Math.max(1, max - min);
+function PulsingHeart({ bpm }: { bpm: number | null }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  const bpmRef = useRef(bpm);
+  bpmRef.current = bpm;
+  const beating = bpm !== null && bpm >= 30;
+
+  useEffect(() => {
+    if (!beating) {
+      scale.setValue(1);
+      return;
+    }
+    let stopped = false;
+    const beat = () => {
+      if (stopped) return;
+      const rate = bpmRef.current;
+      if (rate === null || rate < 30) return;
+      const beatMs = Math.round(60000 / rate);
+      const rise = Math.max(80, Math.round(beatMs * 0.22));
+      const fall = Math.max(120, beatMs - rise);
+      Animated.sequence([
+        Animated.timing(scale, {
+          toValue: 1.28,
+          duration: rise,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(scale, {
+          toValue: 1,
+          duration: fall,
+          easing: Easing.inOut(Easing.quad),
+          useNativeDriver: true,
+        }),
+      ]).start(({ finished }) => {
+        if (finished && !stopped) beat();
+      });
+    };
+    beat();
+    return () => {
+      stopped = true;
+      scale.stopAnimation();
+    };
+  }, [beating, scale]);
+
+  return <Animated.Text style={[styles.heartGlyph, { transform: [{ scale }] }]}>❤️</Animated.Text>;
+}
+
+function BpmLine({ points }: { points: number[] }) {
+  const [width, setWidth] = useState(0);
+  const low = Math.min(...points);
+  const high = Math.max(...points);
+  const floor = low === high ? low - 8 : low - 4;
+  const ceiling = low === high ? high + 8 : high + 4;
+  const span = Math.max(1, ceiling - floor);
+  const yFor = (bpm: number) => 8 + ((ceiling - bpm) / span) * (CHART_HEIGHT - 20);
+  const xFor = (index: number) => {
+    if (points.length === 1) return Math.max(12, width - 16);
+    return 10 + (index / (points.length - 1)) * Math.max(0, width - 20);
+  };
+  const coords = width === 0 ? [] : points.map((bpm, index) => ({ x: xFor(index), y: yFor(bpm) }));
+
   return (
-    <View style={styles.trace}>
-      <View style={styles.traceBaseline} />
-      {values.map((value, index) => (
-        <View key={index} style={styles.traceColumn}>
-          <View style={[styles.traceMark, { top: ((max - value) / span) * (TRACE_HEIGHT - 6) }]} />
-        </View>
-      ))}
+    <View style={styles.bpmChart} onLayout={(event) => setWidth(event.nativeEvent.layout.width)}>
+      {coords.slice(1).map((point, index) => {
+        const previous = coords[index];
+        if (!previous) return null;
+        const dx = point.x - previous.x;
+        const dy = point.y - previous.y;
+        const length = Math.hypot(dx, dy);
+        const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+        return (
+          <View
+            key={`line-${index}`}
+            style={[
+              styles.bpmSegment,
+              {
+                left: (previous.x + point.x) / 2 - length / 2,
+                top: (previous.y + point.y) / 2 - 1.5,
+                width: length,
+                transform: [{ rotate: `${angle}deg` }],
+              },
+            ]}
+          />
+        );
+      })}
+      {coords.map((point, index) => {
+        const latest = index === coords.length - 1;
+        const size = latest ? 10 : 6;
+        return (
+          <View
+            key={`node-${index}`}
+            style={[
+              styles.bpmNode,
+              latest && styles.bpmNodeLatest,
+              { height: size, left: point.x - size / 2, top: point.y - size / 2, width: size },
+            ]}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -380,39 +480,34 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
     fontWeight: '700',
   },
-  heartRow: {
+  heartBlock: {
+    gap: 12,
+  },
+  heartReadout: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 16,
+    gap: 12,
   },
-  sparkWrap: {
-    flex: 1,
-    gap: 4,
-    minWidth: 120,
+  heartGlyph: {
+    fontSize: 36,
+    lineHeight: 42,
   },
-  trace: {
-    flexDirection: 'row',
-    height: TRACE_HEIGHT,
+  bpmChart: {
+    height: CHART_HEIGHT,
   },
-  traceBaseline: {
-    backgroundColor: colors.line,
-    height: 1,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    top: TRACE_HEIGHT / 2,
-  },
-  traceColumn: {
-    flex: 1,
-    height: TRACE_HEIGHT,
-  },
-  traceMark: {
+  bpmSegment: {
     backgroundColor: colors.accent,
     borderRadius: 2,
-    height: 4,
-    left: 0,
+    height: 3,
     position: 'absolute',
-    right: 0,
+  },
+  bpmNode: {
+    backgroundColor: colors.text,
+    borderRadius: 99,
+    position: 'absolute',
+  },
+  bpmNodeLatest: {
+    backgroundColor: colors.accent,
   },
   meter: {
     height: 22,

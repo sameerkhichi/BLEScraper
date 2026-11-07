@@ -19,6 +19,8 @@ import {
   parseRawSensor,
   ringTilt,
   startHeartRatePacket,
+  continueHeartRatePacket,
+  smoothHeartRate,
   parseRealtime,
   RAW_SENSOR_DISABLE,
   rawSensorPacket,
@@ -146,6 +148,16 @@ test('manual heart rate uses the QRing start packet', () => {
   const packet = startHeartRatePacket();
   assert.deepEqual(Array.from(packet.slice(0, 3)), [105, 1, 0]);
   assert.equal(isValidPacket(packet), true);
+  const next = continueHeartRatePacket();
+  assert.deepEqual(Array.from(next.slice(0, 3)), [105, 1, 3]);
+  assert.equal(isValidPacket(next), true);
+});
+
+test('a few heart-rate samples settle on the middle value', () => {
+  assert.equal(smoothHeartRate([]), null);
+  assert.equal(smoothHeartRate([80]), 80);
+  assert.equal(smoothHeartRate([70, 110, 72]), 72);
+  assert.equal(smoothHeartRate([68, 70, 71, 90]), 71);
 });
 
 test('a heart-rate packet says whether the ring is being worn', () => {

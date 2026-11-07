@@ -19,13 +19,7 @@ import type { UploadPayload } from '../model';
 import { pauseAutoSync } from '../sync/ringGate';
 import { useAppState } from '../state/AppProvider';
 
-const WAVE_POINTS = 72;
-
-function pulseSample(phase: number): number {
-  if (phase < 0.12) return Math.sin((phase / 0.12) * Math.PI);
-  if (phase < 0.2) return 0.18 * Math.sin(((phase - 0.12) / 0.08) * Math.PI);
-  return 0;
-}
+const BEAT_POINTS = 40;
 
 function totalSteps(payload: { steps: { steps: number }[] } | null): number {
   if (!payload) return 0;
@@ -47,12 +41,12 @@ export default function HomeScreen() {
     useAppState();
   const [heartPhase, setHeartPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
   const [liveBpm, setLiveBpm] = useState<number | null>(null);
-  const [wave, setWave] = useState<number[]>([]);
+  const [beats, setBeats] = useState<number[]>([]);
+  const [heartAt, setHeartAt] = useState<number | null>(null);
   const [heartError, setHeartError] = useState<string | null>(null);
   const heartStop = useRef<(() => void) | null>(null);
   const heartMounted = useRef(true);
   const bpmRef = useRef<number | null>(null);
-  const usingPpg = useRef(false);
   const debugLines = useSyncExternalStore(subscribeDebugLog, getDebugLines);
   const insets = useSafeAreaInsets();
   const waiting = queue.length > 0;
@@ -78,20 +72,6 @@ export default function HomeScreen() {
     };
   }, []);
 
-  useEffect(() => {
-    if (heartPhase !== 'live') return;
-    const started = Date.now();
-    const timer = setInterval(() => {
-      if (usingPpg.current) return;
-      const bpm = bpmRef.current;
-      if (bpm === null || bpm <= 0) return;
-      const period = 60 / bpm;
-      const elapsedSec = (Date.now() - started) / 1000;
-      setWave((current) => [...current, pulseSample((elapsedSec % period) / period)].slice(-WAVE_POINTS));
-    }, 50);
-    return () => clearInterval(timer);
-  }, [heartPhase]);
-
   const startHeart = async () => {
     if (!settings.ringId) {
       router.push('/scan');
@@ -99,10 +79,10 @@ export default function HomeScreen() {
     }
     const ringId = settings.ringId;
     setHeartError(null);
-    setWave([]);
+    setBeats([]);
+    setHeartAt(null);
     setHeartPhase('connecting');
     bpmRef.current = null;
-    usingPpg.current = false;
     const session = { cancel: false, stop: null as (() => void) | null };
     heartStop.current = () => {
       session.cancel = true;
@@ -117,17 +97,11 @@ export default function HomeScreen() {
         if (heartMounted.current) setHeartPhase('live');
         await client.watchHeartRate((frame) => {
           if (!heartMounted.current) return;
-          if (frame.kind === 'bpm') {
-            bpmRef.current = frame.bpm;
-            setLiveBpm(frame.bpm);
-            return;
-          }
-          if (!usingPpg.current) {
-            usingPpg.current = true;
-            setWave([frame.value]);
-            return;
-          }
-          setWave((current) => [...current, frame.value].slice(-WAVE_POINTS));
+          if (frame.kind !== 'bpm') return;
+          bpmRef.current = frame.bpm;
+          setLiveBpm(frame.bpm);
+          setHeartAt(Date.now());
+          setBeats((current) => [...current, frame.bpm].slice(-BEAT_POINTS));
         });
       });
     } catch (caught) {
@@ -163,7 +137,18 @@ export default function HomeScreen() {
 
         <Card>
           <Text style={styles.label}>Heart rate</Text>
-          <HeartRateChart bpm={liveBpm ?? lastPayload?.realtimeHeartRate ?? null} wave={wave} />
+          <HeartRateChart
+            bpm={liveBpm ?? lastPayload?.realtimeHeartRate ?? null}
+            live={heartPhase === 'live'}
+            points={
+              beats.length > 0
+                ? beats
+                : (lastPayload?.heartRate ?? []).slice(-BEAT_POINTS).map((sample) => sample.bpm)
+            }
+          />
+          {heartPhase === 'live' && heartAt ? (
+            <Text style={styles.meta}>Last sample {new Date(heartAt).toLocaleTimeString()}</Text>
+          ) : null}
           {heartError ? <Text style={styles.warning}>{heartError}</Text> : null}
           {heartPhase === 'connecting' ? <ActivityIndicator color={colors.accent} /> : null}
           {heartPhase === 'idle' ? (
