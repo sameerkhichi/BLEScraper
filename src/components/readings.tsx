@@ -82,7 +82,7 @@ export function ActivityChart({ steps }: { steps: StepSample[] }) {
               {formatCount(stepTotal)}
             </Text>
           </View>
-          <ShoeOutline />
+          <Text style={styles.activityIcon}>👟</Text>
           <Text style={styles.meta}>Steps</Text>
         </View>
         <View style={styles.activityStat}>
@@ -91,31 +91,10 @@ export function ActivityChart({ steps }: { steps: StepSample[] }) {
               {formatCount(calories)}
             </Text>
           </View>
-          <FlameOutline />
+          <Text style={styles.activityIcon}>🔥</Text>
           <Text style={styles.meta}>Calories</Text>
         </View>
       </View>
-    </View>
-  );
-}
-
-function ShoeOutline() {
-  return (
-    <View accessibilityLabel="Shoe" style={styles.shoe}>
-      <View style={styles.shoeHeel} />
-      <View style={styles.shoeUpper} />
-      <View style={styles.shoeToe} />
-      <View style={styles.shoeLace} />
-      <View style={styles.shoeSole} />
-    </View>
-  );
-}
-
-function FlameOutline() {
-  return (
-    <View accessibilityLabel="Flame" style={styles.flame}>
-      <View style={styles.flameOuter} />
-      <View style={styles.flameInner} />
     </View>
   );
 }
@@ -411,96 +390,9 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  shoe: {
-    height: 40,
-    marginTop: 4,
-    width: 76,
-  },
-  shoeHeel: {
-    borderBottomWidth: 0,
-    borderColor: colors.accent,
-    borderTopLeftRadius: 6,
-    borderTopRightRadius: 5,
-    borderWidth: 2,
-    height: 24,
-    position: 'absolute',
-    right: 6,
-    top: 6,
-    width: 16,
-  },
-  shoeUpper: {
-    borderBottomWidth: 0,
-    borderColor: colors.accent,
-    borderTopLeftRadius: 14,
-    borderTopRightRadius: 10,
-    borderWidth: 2,
-    height: 18,
-    left: 8,
-    position: 'absolute',
-    top: 12,
-    width: 58,
-  },
-  shoeToe: {
-    borderBottomLeftRadius: 8,
-    borderBottomWidth: 0,
-    borderColor: colors.accent,
-    borderRightWidth: 0,
-    borderTopLeftRadius: 12,
-    borderWidth: 2,
-    height: 16,
-    left: 2,
-    position: 'absolute',
-    top: 16,
-    width: 22,
-  },
-  shoeLace: {
-    backgroundColor: colors.accent,
-    height: 2,
-    left: 26,
-    position: 'absolute',
-    top: 18,
-    width: 14,
-  },
-  shoeSole: {
-    borderColor: colors.accent,
-    borderRadius: 5,
-    borderWidth: 2,
-    bottom: 2,
-    height: 8,
-    left: 0,
-    position: 'absolute',
-    width: 76,
-  },
-  flame: {
-    alignItems: 'center',
-    height: 40,
-    justifyContent: 'flex-end',
-    marginTop: 4,
-    width: 28,
-  },
-  flameOuter: {
-    borderBottomLeftRadius: 14,
-    borderBottomRightRadius: 10,
-    borderColor: '#ff8a3d',
-    borderTopLeftRadius: 12,
-    borderTopRightRadius: 14,
-    borderWidth: 2,
-    height: 28,
-    transform: [{ rotate: '8deg' }],
-    width: 18,
-  },
-  flameInner: {
-    borderBottomLeftRadius: 8,
-    borderBottomRightRadius: 8,
-    borderColor: '#ffb020',
-    borderTopLeftRadius: 8,
-    borderTopRightRadius: 6,
-    borderWidth: 2,
-    bottom: 6,
-    height: 14,
-    left: 10,
-    position: 'absolute',
-    width: 8,
+  activityIcon: {
+    fontSize: 28,
+    lineHeight: 34,
   },
   scaleRow: {
     flexDirection: 'row',
