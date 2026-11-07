@@ -56,10 +56,18 @@ export async function markSyncCompleted(parts: { logs?: boolean; vitals?: boolea
   await saveAutoSyncState({
     ...state,
     failedAt: null,
+    asleepAt: null,
     logsAt: parts.logs ? now : state.logsAt,
     vitalsAt: parts.vitals ? now : state.vitalsAt,
     sleepAt: parts.sleep ? now : state.sleepAt,
   });
+}
+
+export async function markRingAsleep(): Promise<number> {
+  const state = await loadAutoSyncState();
+  const next: AutoSyncState = { ...state, failedAt: null, asleepAt: new Date().toISOString() };
+  await saveAutoSyncState(next);
+  return evaluateSchedule(next, Date.now()).waitMs;
 }
 
 export async function runAutoSync(options: { allowAndroidService: boolean }): Promise<AutoSyncResult> {
@@ -97,6 +105,14 @@ export async function runAutoSync(options: { allowAndroidService: boolean }): Pr
       report('Connecting to the ring');
       const client = await openRing(ringId);
       const collected = await collectRing(client, ringId, current.ringName, plan.plan, report);
+      if (!collected.worn) {
+        const waitMs = await markRingAsleep();
+        return {
+          outcome: 'idle',
+          waitMs,
+          message: collected.payload.warnings[0] ?? 'Ring is not being worn. Leaving it asleep.',
+        };
+      }
       await closeRing();
       if (radioHeld) {
         radioHeld = false;
@@ -176,6 +192,7 @@ function advanceMarks(state: AutoSyncState, plan: SyncPlan): AutoSyncState {
     vitalsAt: plan.vitals ? now : state.vitalsAt,
     sleepAt: plan.sleep ? now : state.sleepAt,
     failedAt: null,
+    asleepAt: null,
   };
 }
 

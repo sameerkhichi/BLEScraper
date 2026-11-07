@@ -63,6 +63,7 @@ export async function loadAutoSyncState(): Promise<AutoSyncState> {
     vitalsAt: timeOrNull(parsed.vitalsAt),
     sleepAt: timeOrNull(parsed.sleepAt),
     failedAt: timeOrNull(parsed.failedAt),
+    asleepAt: timeOrNull(parsed.asleepAt),
   };
 }
 

@@ -14,6 +14,7 @@ import {
   isLikelyRing,
   bodyTemperatureCelsius,
   parseBattery,
+  classifyWear,
   parseLiveHeartRate,
   parseRawSensor,
   parseRealtime,
@@ -137,6 +138,17 @@ test('live heart rate accepts the BPM wherever this ring places it', () => {
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 6, 0, 68)), 68);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 1, 2, 0)), null);
   assert.equal(parseLiveHeartRate(Uint8Array.of(105, 3, 0, 98)), null);
+});
+
+test('a heart-rate packet says whether the ring is being worn', () => {
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 0, 72)), 'worn');
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 1, 72)), 'worn');
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 72, 0)), 'worn');
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 1, 0)), 'off');
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 5, 0)), 'off');
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 0, 0)), 'pending');
+  assert.equal(classifyWear(Uint8Array.of(105, 1, 2, 0)), 'pending');
+  assert.equal(classifyWear(Uint8Array.of(105, 3, 1, 0)), 'pending');
 });
 
 test('temperature and blood oxygen use their own realtime types', () => {

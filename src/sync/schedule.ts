@@ -8,11 +8,13 @@ export const HISTORY_MINUTES = 15;
 export const VITALS_MINUTES = 30;
 export const SLEEP_HOURS = 6;
 export const RETRY_MINUTES = 15;
+// An unworn ring goes back to sleep. The next check waits out a normal log interval.
 
 export const HISTORY_INTERVAL_MS = HISTORY_MINUTES * 60 * 1000;
 export const VITALS_INTERVAL_MS = VITALS_MINUTES * 60 * 1000;
 export const SLEEP_INTERVAL_MS = SLEEP_HOURS * 60 * 60 * 1000;
 export const RETRY_INTERVAL_MS = RETRY_MINUTES * 60 * 1000;
+export const UNWORN_INTERVAL_MS = HISTORY_INTERVAL_MS;
 
 export type SyncPlan = {
   logs: boolean;
@@ -25,6 +27,7 @@ export type AutoSyncState = {
   vitalsAt: string | null;
   sleepAt: string | null;
   failedAt: string | null;
+  asleepAt: string | null;
 };
 
 export const emptyAutoSyncState: AutoSyncState = {
@@ -32,6 +35,7 @@ export const emptyAutoSyncState: AutoSyncState = {
   vitalsAt: null,
   sleepAt: null,
   failedAt: null,
+  asleepAt: null,
 };
 
 const idlePlan: SyncPlan = { logs: false, vitals: false, sleep: false };
@@ -41,9 +45,12 @@ export function shouldSync(plan: SyncPlan): boolean {
 }
 
 export function evaluateSchedule(state: AutoSyncState, now: number): { plan: SyncPlan; waitMs: number } {
-  const failedAt = parseTime(state.failedAt);
-  if (failedAt !== null && now - failedAt < RETRY_INTERVAL_MS) {
-    return { plan: idlePlan, waitMs: clampWait(failedAt + RETRY_INTERVAL_MS - now) };
+  const waiting = [
+    remainingBlock(state.failedAt, RETRY_INTERVAL_MS, now),
+    remainingBlock(state.asleepAt, UNWORN_INTERVAL_MS, now),
+  ].filter((wait): wait is number => wait !== null);
+  if (waiting.length > 0) {
+    return { plan: idlePlan, waitMs: clampWait(Math.max(...waiting)) };
   }
 
   const logsDue = due(state.logsAt, HISTORY_INTERVAL_MS, now);
@@ -86,6 +93,12 @@ function due(at: string | null, intervalMs: number, now: number): boolean {
   const then = parseTime(at);
   if (then === null) return true;
   return now - then >= intervalMs;
+}
+
+function remainingBlock(at: string | null, intervalMs: number, now: number): number | null {
+  const then = parseTime(at);
+  if (then === null || now - then >= intervalMs) return null;
+  return then + intervalMs - now;
 }
 
 function remaining(at: string | null, intervalMs: number, now: number): number {

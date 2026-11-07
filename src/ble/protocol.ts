@@ -97,6 +97,18 @@ export function isPlausibleHeartRate(value: number): boolean {
   return value >= 30 && value <= 220;
 }
 
+// Live heart-rate packets use byte 2 as a status. 1 with no BPM means the ring
+// is off the finger and has aborted. 2 means this sample is missing but the
+// measurement is still running. 3 or higher aborts for another reason.
+export function classifyWear(packet: Uint8Array): 'worn' | 'off' | 'pending' {
+  if (packet[0] !== CMD_START_REAL_TIME) return 'pending';
+  if (packet[1] !== REALTIME_HEART_RATE && packet[1] !== REALTIME_HEART_RATE_STREAM) return 'pending';
+  if (parseLiveHeartRate(packet) !== null) return 'worn';
+  const status = packet[2] ?? 0;
+  if (status === 1 || status >= 3) return 'off';
+  return 'pending';
+}
+
 export function isPlausibleSpo2(value: number): boolean {
   return value >= 70 && value <= 100;
 }

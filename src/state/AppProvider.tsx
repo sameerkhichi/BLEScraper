@@ -5,7 +5,7 @@ import { closeRing } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
 import { mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
-import { markSyncCompleted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
+import { markRingAsleep, markSyncCompleted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
 import { runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
@@ -239,6 +239,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const storedQueue = await loadQueue();
         const collected = await syncRing(stored.ringId, stored.ringName, setStatus);
         await closeRing();
+        if (!collected.worn) {
+          await markRingAsleep();
+          setStatus(collected.payload.warnings[0] ?? 'Ring is not being worn. Leaving it asleep.');
+          return;
+        }
         const payload =
           collected.sleepLoaded || !previous
             ? collected.payload
@@ -267,8 +272,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
       try {
         const previous = await loadLastPayload();
         const storedQueue = await loadQueue();
-        const payload = await scanRing(stored.ringId, stored.ringName, kind, setStatus);
+        const reading = await scanRing(stored.ringId, stored.ringName, kind, setStatus);
         await closeRing();
+        if (!reading.worn) {
+          await markRingAsleep();
+          setStatus(reading.payload.warnings[0] ?? 'Ring is not being worn. Leaving it asleep.');
+          return;
+        }
+        const payload = reading.payload;
         const succeeded =
           payload.realtimeHeartRate !== null || payload.spo2 !== null || payload.bodyTemperatureC !== null;
         if (!succeeded) {

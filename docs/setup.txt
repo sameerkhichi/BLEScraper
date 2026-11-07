@@ -83,7 +83,7 @@ The ring clock is set to UTC on each sync. Heart-rate history is 5-minute sample
 Automatic sync
 --------------
 
-With a ring selected, the phone checks on its own. Steps and stored heart rate are read every 15 minutes. Live heart rate, blood oxygen, and body temperature are read every 30 minutes because those turn the ring lights on. Sleep is included about every 6 hours. Bluetooth disconnects when the check finishes.
+With a ring selected, the phone checks on its own. It first looks for a heart rate. If nobody is wearing the ring, it turns the sensor off and leaves the ring asleep until the next check. Steps and stored heart rate are read every 15 minutes. Live heart rate, blood oxygen, and body temperature are read every 30 minutes because those turn the ring lights on. Sleep is included about every 6 hours. Bluetooth disconnects when the check finishes.
 
 The check also runs when you open the app, and the system can run it after you leave or lock the phone. iOS chooses that timing and often waits longer than 15 minutes. Android shows a notification only during a check so the read can finish if the screen locks. Turn it off under Settings, Keep syncing.
 

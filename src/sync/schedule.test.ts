@@ -75,6 +75,23 @@ test('sleep does not turn the ring lights on', () => {
   assert.equal(decision.plan.sleep, true);
 });
 
+test('an unworn ring stays asleep until the next log interval', () => {
+  const cooling = evaluateSchedule(
+    { ...emptyAutoSyncState, asleepAt: new Date(t0).toISOString() },
+    t0 + 2 * 60 * 1000,
+  );
+  assert.equal(cooling.plan.logs, false);
+  assert.equal(cooling.plan.vitals, false);
+  assert.equal(cooling.waitMs, HISTORY_INTERVAL_MS - 2 * 60 * 1000);
+
+  const ready = evaluateSchedule(
+    { ...emptyAutoSyncState, asleepAt: new Date(t0).toISOString() },
+    t0 + HISTORY_INTERVAL_MS,
+  );
+  assert.equal(ready.plan.logs, true);
+  assert.equal(ready.waitMs, 0);
+});
+
 test('a failed check waits out the backoff before using the radio again', () => {
   const cooling = evaluateSchedule(
     { ...emptyAutoSyncState, failedAt: new Date(t0).toISOString() },

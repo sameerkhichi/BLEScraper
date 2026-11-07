@@ -25,6 +25,7 @@ import {
   UART_TX_UUID,
   batteryPacket,
   bodyTemperatureCelsius,
+  classifyWear,
   isPlausibleSpo2,
   parseBattery,
   parseLiveHeartRate,
@@ -49,6 +50,9 @@ import {
 const HISTORY_TIMEOUT_MS = 15000;
 const SHORT_TIMEOUT_MS = 5000;
 const HEART_RATE_TIMEOUT_MS = 35000;
+const WEAR_PROBE_MS = 18000;
+
+export const NOT_WORN_MESSAGE = 'Ring is not being worn. Leaving it asleep.';
 
 type BleFailure = {
   message?: string;
@@ -270,6 +274,10 @@ export class RingClient {
     });
   }
 
+  async checkWorn(): Promise<{ wearing: true; bpm: number } | { wearing: false; reason: string }> {
+    return this.run(() => this.probeWear(WEAR_PROBE_MS));
+  }
+
   async measureHeartRate(): Promise<number | null> {
     return this.run(() => this.collectHeartRate(HEART_RATE_TIMEOUT_MS));
   }
@@ -339,6 +347,80 @@ export class RingClient {
       }
       if (attempt === 0) await delay(200);
     }
+  }
+
+  private async probeWear(
+    timeoutMs: number,
+  ): Promise<{ wearing: true; bpm: number } | { wearing: false; reason: string }> {
+    let bpm: number | null = null;
+    let reportedOff = false;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        let offTimer: ReturnType<typeof setTimeout> | null = null;
+        const clearOff = () => {
+          if (!offTimer) return;
+          clearTimeout(offTimer);
+          offTimer = null;
+        };
+        const timer = setTimeout(() => complete(), timeoutMs);
+        const complete = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          clearOff();
+          this.listeners.delete(CMD_START_REAL_TIME);
+          this.aborts.delete(abort);
+          resolve();
+        };
+        const abort = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          clearOff();
+          this.listeners.delete(CMD_START_REAL_TIME);
+          this.aborts.delete(abort);
+          reject(error);
+        };
+        this.aborts.add(abort);
+        this.listeners.set(CMD_START_REAL_TIME, (packet) => {
+          const wear = classifyWear(packet);
+          if (wear === 'worn') {
+            clearOff();
+            bpm = parseLiveHeartRate(packet);
+            complete();
+            return;
+          }
+          if (wear === 'pending') {
+            clearOff();
+            return;
+          }
+          reportedOff = true;
+          const status = packet[2] ?? 0;
+          debugLog(`Wear packet ${toHex(packet)} status ${status}`);
+          if (status >= 3) {
+            complete();
+            return;
+          }
+          if (!offTimer) offTimer = setTimeout(() => complete(), 3000);
+        });
+        this.send(startRealtimePacket(REALTIME_HEART_RATE)).catch(abort);
+      });
+    } finally {
+      try {
+        await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
+      } catch {
+        // The stop command can fail after the ring has already ended the reading.
+      }
+    }
+
+    if (bpm !== null) {
+      debugLog(`Ring is being worn. Heart rate ${bpm}`);
+      return { wearing: true, bpm };
+    }
+    debugLog(reportedOff ? 'Ring reported that it is not being worn.' : 'No heart-rate reading. Treating the ring as unworn.');
+    return { wearing: false, reason: NOT_WORN_MESSAGE };
   }
 
   private async collectHeartRate(timeoutMs: number): Promise<number | null> {
