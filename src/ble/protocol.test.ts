@@ -17,6 +17,7 @@ import {
   classifyWear,
   parseLiveHeartRate,
   parseRawSensor,
+  ringTilt,
   startHeartRatePacket,
   parseRealtime,
   RAW_SENSOR_DISABLE,
@@ -181,6 +182,13 @@ test('raw accelerometer packet decodes 12-bit axes in g', () => {
   assert.deepEqual(ppg, { kind: 'ppg', value: 12894, max: 12918, min: 12574, diff: 344 });
   assert.equal(rawSensorPacket(0x04)[1], 0x04);
   assert.equal(rawSensorPacket(RAW_SENSOR_DISABLE)[1], 0x05);
+});
+
+test('tilt follows the finger and stays put when the ring is turned over', () => {
+  assert.deepEqual(ringTilt({ x: 0, y: 0, z: 1 }), { alongDeg: 0, acrossDeg: 0 });
+  assert.deepEqual(ringTilt({ x: 0, y: 0, z: -1 }), { alongDeg: 0, acrossDeg: 0 });
+  assert.deepEqual(ringTilt({ x: 0.5, y: 0, z: Math.sqrt(3) / 2 }), { alongDeg: 30, acrossDeg: 0 });
+  assert.deepEqual(ringTilt({ x: 0, y: -1, z: 0 }), { alongDeg: 0, acrossDeg: -90 });
 });
 
 test('QRing names such as COLMI_CA02 count as the ring', () => {

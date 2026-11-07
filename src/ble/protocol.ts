@@ -168,6 +168,14 @@ function signed12(value: number): number {
   return raw >= 0x800 ? raw - 0x1000 : raw;
 }
 
+// Degrees each axis is raised from level. Positive X is the fingertip end up.
+// Positive Y is the right side of that view up. Turning the ring over does not swap the sign.
+export function ringTilt(reading: AccelReading): { alongDeg: number; acrossDeg: number } {
+  const along = (Math.atan2(reading.x, Math.hypot(reading.y, reading.z)) * 180) / Math.PI;
+  const across = (Math.atan2(reading.y, Math.hypot(reading.x, reading.z)) * 180) / Math.PI;
+  return { alongDeg: Math.round(along), acrossDeg: Math.round(across) };
+}
+
 export class HeartRateLogParser {
   private raw: number[] = [];
   private timestampMs: number | null = null;

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 import { openRing } from '../ble/ringClient';
-import type { RawSensorFrame } from '../ble/protocol';
+import { ringTilt, type RawSensorFrame } from '../ble/protocol';
 import { Button, Card, colors } from '../components/ui';
 import type { AccelSample } from '../model';
 import { pauseAutoSync } from '../sync/ringGate';
@@ -78,18 +78,30 @@ export default function MotionScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
       <Text style={styles.body}>
-        X runs along the finger, Y around the band, and Z through the ring. At rest the total stays near 1 g.
-        The red and green lights flash while this runs, because those sensors share the stream with the
-        accelerometer. They turn off when you stop.
+        The circle is the ring, fingertip at the top. The dot rolls toward whichever side you lower. The bars are
+        the three sensor directions in g, and the strip at the bottom is shake, not tilt. The red and green
+        lights flash while this runs and turn off when you stop.
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Card>
         <Level sample={sample} />
-        <Text style={styles.magnitude}>{sample ? `${magnitude(sample).toFixed(2)} g` : '—'}</Text>
-        <AxisBar label="X" value={sample?.x ?? null} />
-        <AxisBar label="Y" value={sample?.y ?? null} />
-        <AxisBar label="Z" value={sample?.z ?? null} />
+        <Text style={styles.meta}>The dot rolls toward the low side. Top of the circle is the fingertip.</Text>
+        <Text style={styles.magnitude}>{sample ? `${magnitude(sample).toFixed(2)} g total` : '—'}</Text>
+        <Text style={styles.meta}>About 1 g while the ring is still. That is gravity, already included.</Text>
+        <AxisBar
+          label="Along the finger"
+          detail={sample ? tiltWords(ringTilt(sample).alongDeg, 'fingertip up', 'fingertip down') : 'X'}
+          value={sample?.x ?? null}
+        />
+        <AxisBar
+          label="Across the finger"
+          detail={sample ? tiltWords(ringTilt(sample).acrossDeg, 'right side up', 'right side down') : 'Y'}
+          value={sample?.y ?? null}
+        />
+        <AxisBar label="Through the ring" detail={sample ? faceWords(sample.z) : 'Z'} value={sample?.z ?? null} />
+        <Text style={styles.axisLabel}>Shake</Text>
         <Sparkline values={history} />
+        <Text style={styles.meta}>Each bar is one sample. A still ring stays short. Shaking it makes a tall bar.</Text>
         <Text style={styles.meta}>
           PPG {ppg ?? '—'} · Optical {optical ?? '—'}
         </Text>
@@ -135,23 +147,55 @@ function applyFrame(
   if (frame.kind === 'optical') setOptical(frame.value);
 }
 
+function tiltWords(deg: number, raised: string, lowered: string): string {
+  if (Math.abs(deg) < 3) return 'level';
+  return deg > 0 ? `${raised} ${deg}°` : `${lowered} ${Math.abs(deg)}°`;
+}
+
+function faceWords(z: number): string {
+  if (z > 0.7) return 'lights face up';
+  if (z < -0.7) return 'lights face down';
+  if (Math.abs(z) < 0.3) return 'lights on edge';
+  return z > 0 ? 'lights turning up' : 'lights turning down';
+}
+
+function lowSide(sample: AccelSample): { x: number; y: number } {
+  const tilt = ringTilt(sample);
+  // Positive tilt means that side is up, so the low side is the opposite direction.
+  let x = -tilt.acrossDeg / 90;
+  let y = tilt.alongDeg / 90;
+  const length = Math.hypot(x, y);
+  if (length > 1) {
+    x /= length;
+    y /= length;
+  }
+  return { x, y };
+}
+
 function Level({ sample }: { sample: AccelSample | null }) {
-  const x = Math.max(-1, Math.min(1, sample?.x ?? 0));
-  const y = Math.max(-1, Math.min(1, sample?.y ?? 0));
+  const dot = sample ? lowSide(sample) : null;
   return (
-    <View style={styles.pad}>
-      <View style={styles.crosshairH} />
-      <View style={styles.crosshairV} />
-      {sample ? (
-        <View style={[styles.dot, { left: `${50 + x * 42}%`, top: `${50 - y * 42}%` }]} />
-      ) : (
-        <Text style={styles.padHint}>Start to see tilt</Text>
-      )}
+    <View style={styles.level}>
+      <Text style={styles.levelCaption}>fingertip</Text>
+      <View style={styles.levelRow}>
+        <Text style={styles.levelSide}>left</Text>
+        <View style={styles.pad}>
+          <View style={styles.crosshairH} />
+          <View style={styles.crosshairV} />
+          {dot ? (
+            <View style={[styles.dot, { left: `${50 + dot.x * 38}%`, top: `${50 + dot.y * 38}%` }]} />
+          ) : (
+            <Text style={styles.padHint}>Start to see tilt</Text>
+          )}
+        </View>
+        <Text style={styles.levelSide}>right</Text>
+      </View>
+      <Text style={styles.levelCaption}>knuckle</Text>
     </View>
   );
 }
 
-function AxisBar({ label, value }: { label: string; value: number | null }) {
+function AxisBar({ label, detail, value }: { label: string; detail: string; value: number | null }) {
   const shown = value ?? 0;
   const clamped = Math.max(-2, Math.min(2, shown));
   const width = (Math.abs(clamped) / 2) * 50;
@@ -160,8 +204,9 @@ function AxisBar({ label, value }: { label: string; value: number | null }) {
     <View style={styles.axis}>
       <View style={styles.axisHead}>
         <Text style={styles.axisLabel}>{label}</Text>
-        <Text style={styles.axisValue}>{value === null ? '—' : shown.toFixed(2)}</Text>
+        <Text style={styles.axisValue}>{value === null ? '—' : `${shown.toFixed(2)} g`}</Text>
       </View>
+      <Text style={styles.meta}>{detail}</Text>
       <View style={styles.track}>
         {value !== null ? (
           <View
@@ -179,16 +224,19 @@ function AxisBar({ label, value }: { label: string; value: number | null }) {
 
 function Sparkline({ values }: { values: number[] }) {
   if (values.length === 0) {
-    return <Text style={styles.meta}>Magnitude fills in as samples arrive.</Text>;
+    return <Text style={styles.meta}>Shake shows up here once samples arrive.</Text>;
   }
   return (
     <View style={styles.spark}>
-      {values.map((value, index) => (
-        <View
-          key={`${index}-${value.toFixed(3)}`}
-          style={[styles.sparkBar, { height: 4 + (Math.min(value, 2) / 2) * 32 }]}
-        />
-      ))}
+      {values.map((value, index) => {
+        const shake = Math.abs(value - 1);
+        return (
+          <View
+            key={`${index}-${value.toFixed(3)}`}
+            style={[styles.sparkBar, { height: 4 + (Math.min(shake, 2) / 2) * 32 }]}
+          />
+        );
+      })}
     </View>
   );
 }
@@ -221,6 +269,25 @@ const styles = StyleSheet.create({
   magnitude: {
     color: colors.text,
     fontSize: 28,
+    fontWeight: '700',
+  },
+  level: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  levelRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  levelCaption: {
+    color: colors.muted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  levelSide: {
+    color: colors.muted,
+    fontSize: 12,
     fontWeight: '700',
   },
   pad: {
