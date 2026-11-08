@@ -428,7 +428,8 @@ export class SportDetailParser {
     const day = bcdToDecimal(packet[3]);
     const timeIndex = packet[4];
     let calories = packet[7] | (packet[8] << 8);
-    if (this.newCalorieProtocol) calories *= 10;
+    // Newer rings store this field in hundredths of a kilocalorie. Older rings store whole kilocalories.
+    if (this.newCalorieProtocol) calories /= 100;
     const steps = packet[9] | (packet[10] << 8);
     const distanceMeters = packet[11] | (packet[12] << 8);
     const hour = Math.floor(timeIndex / 4);

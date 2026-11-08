@@ -118,8 +118,27 @@ test('steps parser returns no data and a finished interval', () => {
     {
       timestamp: '2026-11-06T04:00:00.000Z',
       steps: 100,
-      calories: 100,
+      calories: 0.1,
       distanceMeters: 50,
+    },
+  ]);
+});
+
+test('new calorie protocol stores hundredths of a kilocalorie', () => {
+  const parser = new SportDetailParser();
+  const header = Uint8Array.from([67, 0xf0, 5, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  assert.equal(parser.parse(header), null);
+
+  // Captured block: 48 steps, 27 m, raw calorie field 200.
+  const record = Uint8Array.from([
+    67, 0x23, 0x08, 0x13, 0x10, 0, 1, 0xc8, 0x00, 0x30, 0x00, 0x1b, 0, 0, 0, 0,
+  ]);
+  assert.deepEqual(parser.parse(record), [
+    {
+      timestamp: '2023-08-13T04:00:00.000Z',
+      steps: 48,
+      calories: 2,
+      distanceMeters: 27,
     },
   ]);
 });
