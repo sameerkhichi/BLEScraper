@@ -21,6 +21,7 @@ export default function RootLayout() {
         <Stack.Screen name="motion" options={{ title: 'Accelerometer' }} />
         <Stack.Screen name="sleep" options={{ title: 'Sleep' }} />
         <Stack.Screen name="settings" options={{ title: 'Settings' }} />
+        <Stack.Screen name="queue" options={{ title: 'Waiting to send' }} />
       </Stack>
     </AppProvider>
   );

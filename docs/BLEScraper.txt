@@ -17,6 +17,7 @@ Notes
 - The Bluetooth protocal will be handled through a known react native package to scan for BLE connections. Then a reverse engineered COLMI protocol to decode the raw data coming from the ring. 
 - The app will hold pending uploads of data until connections is re-established.
 - Sleep is saved on the phone when a wake downloads it and while the app is open. The ring can be on the table. Heart rate and steps already saved stay put.
+- The sleep score is estimated on the phone from the stages. The ring does not send one, and the score is not in the upload.
 - Will allow for HTTP/JSON communication with an API.
 - EAS Build will upload the ipa build to app store connect
 - App store connect will automatically add the app to testflight and will install on my phone
@@ -36,6 +37,22 @@ While the app is open, steps and stored heart rate are also read every 15 minute
 Sleep on the phone
 
 A wake stores the sleep nights still on the ring, whether or not the ring is being worn. While the app is open, sleep is read about every 6 hours. The timer wakes for that read even if heart rate and steps are not due yet. The ring can be nearby but off a finger. That read does not turn the lights on, and it does not replace the heart-rate or step samples already saved. The nights are written into the saved reading, so the Sleep screen and the upload queue both keep them. Sync ring does the same thing if the ring is not on a finger. If the ring does not answer, the next check tries again. A failed sleep read does not wait out the full 6 hours.
+
+Sleep score
+
+The ring does not report a score. The phone estimates one for the Sleep screen and labels it estimated. That number is not stored as its own field and is not sent in the JSON. Solloid can recompute it from the stages.
+
+minutesAsleep is light + deep + rem. Awake and unknown minutes are left out of that total. awakenings is how many awake stages were stored. minutesAwake is the sum of those awake stages.
+
+The score is three parts, then clamped to 0–100 and rounded.
+
+Duration. Eight hours asleep scores 100. Each hour shorter or longer than 8 costs 15 points, and the result cannot go below 0. Six hours and ten hours both score 70. Under about 1 hour 20 minutes, or over about 14 hours 40 minutes, duration scores 0.
+
+Restorative sleep. This is the percent of minutesAsleep that was deep or REM. Light sleep is in the total, so it lowers this percent. A night with no time asleep scores 0. Unknown minutes are not part of this percent.
+
+Awake penalty. Each awakening costs 8 points, and each minute awake costs one third of a point. The penalty stops at 40.
+
+The score is half the duration part plus half the restorative part, minus the awake penalty. 85 or more is Excellent. 70 or more is Good. 50 or more is Fair. Anything lower is Poor.
 
 Ring storage
 
@@ -69,7 +86,7 @@ Sync posts one JSON body to the API URL (HTTP or the port-forwarded Arduino IP).
 
 Timestamps are UTC ISO-8601. The app sets the ring clock to UTC, and sleep start/end are minutes after that midnight. If start is later than end, sleep began the evening before the wake-up day.
 
-The ring sends stages, not a score and not cycle numbers. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM.
+The ring sends stages, not a score and not cycle numbers. The score shown in the app is the phone estimate described under Sleep score. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM.
 
 {
   "source": "colmi-r09",

@@ -303,6 +303,7 @@ export default function HomeScreen() {
           <Text style={styles.meta}>
             {queue.length === 0 ? 'Nothing waiting to send.' : `${queue.length} reading${queue.length === 1 ? '' : 's'} waiting.`}
           </Text>
+          <Button label="View waiting readings" onPress={() => router.push('/queue')} tone="secondary" />
           <Button label="API settings" onPress={() => router.push('/settings')} tone="secondary" />
         </Card>
 

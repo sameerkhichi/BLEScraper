@@ -9,6 +9,10 @@ function notify(): void {
   listeners.forEach((listener) => listener(busy));
 }
 
+export function ringBusy(): boolean {
+  return depth > 0;
+}
+
 export function subscribeRingBusy(listener: (busy: boolean) => void): () => void {
   listeners.add(listener);
   return () => {

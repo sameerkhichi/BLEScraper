@@ -8,8 +8,8 @@ import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, typ
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { ensureNotificationPermission, reportBattery } from '../sync/notifyBattery';
-import { enqueue, flushQueue, type PendingUpload } from '../sync/queue';
-import { runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
+import { enqueue, flushQueue, forgetDropped, markDropped, removeFromQueue, type PendingUpload } from '../sync/queue';
+import { ringBusy, runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
 import { evaluateUpload } from '../sync/schedule';
 import {
   loadAutoSyncState,
@@ -39,6 +39,8 @@ type AppContextValue = {
   recordHeartRate: (bpm: number) => Promise<void>;
   withRing: <T>(action: () => Promise<T>) => Promise<T>;
   sendPending: () => Promise<void>;
+  removePending: (id: string) => Promise<void>;
+  clearPending: () => Promise<void>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -56,6 +58,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     await saveQueue(next);
   }, []);
 
+  // Callers already hold runWithQueue. Taking it again would wait on this send.
   const sendQueue = useCallback(
     async (nextQueue: PendingUpload[], currentSettings: AppSettings) => {
       if (!currentSettings.apiUrl.trim()) {
@@ -130,7 +133,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setReady(true);
       const upload = evaluateUpload(syncState.uploadAt, storedQueue.length, Date.now());
       if (storedSettings.apiUrl.trim() && upload.due) {
-        await runWithRing(() => sendQueue(storedQueue, storedSettings));
+        await runWithRing(() =>
+          runWithQueue(async () => {
+            await sendQueue(await loadQueue(), storedSettings);
+          }),
+        );
       }
     };
     load().catch((error: unknown) => {
@@ -204,12 +211,14 @@ export function AppProvider({ children }: { children: ReactNode }) {
     async (next: AppSettings) => {
       setSettings(next);
       await saveSettings(next);
-      const storedQueue = await loadQueue();
-      if (storedQueue.length > 0) {
-        await sendQueue(storedQueue, next);
-      } else {
-        setStatus('Settings saved.');
-      }
+      await runWithQueue(async () => {
+        const storedQueue = await loadQueue();
+        if (storedQueue.length > 0) {
+          await sendQueue(storedQueue, next);
+        } else {
+          setStatus('Settings saved.');
+        }
+      });
     },
     [sendQueue],
   );
@@ -263,7 +272,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       try {
         const previous = await loadLastPayload();
-        const storedQueue = await loadQueue();
         const collected = await syncRing(stored.ringId, stored.ringName, setStatus);
         await closeRing();
         if (!collected.worn) {
@@ -274,9 +282,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           }
           const storedSleep = keepStoredSamples(previous, keepSleepRecord(previous, collected.payload));
           await remember(storedSleep);
-          const nextQueue = enqueue(storedQueue, storedSleep);
-          await publishQueue(nextQueue);
-          await sendQueue(nextQueue, stored);
+          await runWithQueue(async () => {
+            const nextQueue = enqueue(await loadQueue(), storedSleep);
+            await publishQueue(nextQueue);
+            await sendQueue(nextQueue, stored);
+          });
           await markSyncCompleted({ sleep: true });
           await markRingAsleep();
           return;
@@ -287,9 +297,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
             : { ...collected.payload, sleep: previous.sleep };
         const merged = keepStoredSamples(previous, mergeReadings(previous, payload, false));
         await remember(merged);
-        const nextQueue = enqueue(storedQueue, payload);
-        await publishQueue(nextQueue);
-        await sendQueue(nextQueue, stored);
+        await runWithQueue(async () => {
+          const nextQueue = enqueue(await loadQueue(), payload);
+          await publishQueue(nextQueue);
+          await sendQueue(nextQueue, stored);
+        });
         await markSyncCompleted({ logs: true, sleep: collected.sleepLoaded });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Sync failed.';
@@ -308,7 +320,6 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       try {
         const previous = await loadLastPayload();
-        const storedQueue = await loadQueue();
         const reading = await scanRing(stored.ringId, stored.ringName, kind, setStatus);
         await closeRing();
         if (!reading.worn) {
@@ -324,9 +335,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
           return;
         }
         await remember(mergeReadings(previous, payload, true));
-        const nextQueue = enqueue(storedQueue, payload);
-        await publishQueue(nextQueue);
-        await sendQueue(nextQueue, stored);
+        await runWithQueue(async () => {
+          const nextQueue = enqueue(await loadQueue(), payload);
+          await publishQueue(nextQueue);
+          await sendQueue(nextQueue, stored);
+        });
         await markSyncCompleted({ vitals: true });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Measurement failed.';
@@ -373,8 +386,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const sendPending = useCallback(async () => {
     await runWithRing(async () => {
       try {
-        const stored = await loadSettings();
-        await sendQueue(await loadQueue(), stored);
+        await runWithQueue(async () => {
+          const stored = await loadSettings();
+          await sendQueue(await loadQueue(), stored);
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Upload failed.';
         debugLog(message);
@@ -382,6 +397,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
     });
   }, [sendQueue]);
+
+  const removePending = useCallback(
+    async (id: string) => {
+      markDropped(id);
+      setQueue((current) => removeFromQueue(current, id));
+      await runWithQueue(async () => {
+        try {
+          const storedQueue = await loadQueue();
+          const nextQueue = removeFromQueue(storedQueue, id);
+          if (nextQueue.length !== storedQueue.length) {
+            await publishQueue(nextQueue);
+            if (!ringBusy()) {
+              setStatus(
+                nextQueue.length === 0
+                  ? 'Nothing waiting to send.'
+                  : `${nextQueue.length} reading${nextQueue.length === 1 ? '' : 's'} waiting.`,
+              );
+            }
+          }
+        } finally {
+          forgetDropped(id);
+        }
+      });
+    },
+    [publishQueue],
+  );
+
+  const clearPending = useCallback(async () => {
+    const ids = (await loadQueue()).map((item) => item.id);
+    if (ids.length === 0) return;
+    for (const id of ids) markDropped(id);
+    setQueue((current) => current.filter((item) => !ids.includes(item.id)));
+    await runWithQueue(async () => {
+      try {
+        const nextQueue = (await loadQueue()).filter((item) => !ids.includes(item.id));
+        await publishQueue(nextQueue);
+        if (!ringBusy()) {
+          setStatus(
+            nextQueue.length === 0
+              ? 'Nothing waiting to send.'
+              : `${nextQueue.length} reading${nextQueue.length === 1 ? '' : 's'} waiting.`,
+          );
+        }
+      } finally {
+        for (const id of ids) forgetDropped(id);
+      }
+    });
+  }, [publishQueue]);
 
   const value = useMemo(
     () => ({
@@ -400,6 +463,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       recordHeartRate,
       withRing,
       sendPending,
+      removePending,
+      clearPending,
     }),
     [
       ready,
@@ -417,6 +482,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       recordHeartRate,
       withRing,
       sendPending,
+      removePending,
+      clearPending,
     ],
   );
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { keepSleepRecord, keepStoredSamples, mergeReadings, type UploadPayload } from '../model';
-import { enqueue, flushQueue } from './queue';
+import { enqueue, flushQueue, forgetDropped, markDropped, removeFromQueue } from './queue';
 
 function sample(bpm: number): UploadPayload {
   return {
@@ -21,6 +21,65 @@ function sample(bpm: number): UploadPayload {
     warnings: [],
   };
 }
+
+test('remove drops one waiting reading and leaves the rest in order', () => {
+  const queue = enqueue(
+    enqueue([], sample(60), new Date('2026-11-06T00:00:00.000Z')),
+    sample(70),
+    new Date('2026-11-06T00:00:01.000Z'),
+  );
+
+  const removed = removeFromQueue(queue, queue[0].id);
+
+  assert.equal(removed.length, 1);
+  assert.equal(removed[0].id, queue[1].id);
+  assert.equal(removed[0].payload.realtimeHeartRate, 70);
+  assert.equal(removeFromQueue(queue, 'missing').length, 2);
+});
+
+test('flush skips a reading removed while an earlier send is in flight', async () => {
+  const queue = enqueue(
+    enqueue([], sample(60), new Date('2026-11-06T00:00:00.000Z')),
+    sample(70),
+    new Date('2026-11-06T00:00:01.000Z'),
+  );
+  const sent: number[] = [];
+
+  try {
+    const result = await flushQueue(queue, async (payload) => {
+      if (payload.realtimeHeartRate === 60) markDropped(queue[1].id);
+      sent.push(payload.realtimeHeartRate ?? 0);
+    });
+
+    assert.deepEqual(sent, [60]);
+    assert.equal(result.remaining.length, 0);
+    assert.equal(result.error, null);
+  } finally {
+    forgetDropped(queue[1].id);
+  }
+});
+
+test('a removed reading is left out when an earlier send fails', async () => {
+  const queue = enqueue(
+    enqueue([], sample(60), new Date('2026-11-06T00:00:00.000Z')),
+    sample(70),
+    new Date('2026-11-06T00:00:02.000Z'),
+  );
+  markDropped(queue[1].id);
+
+  try {
+    const result = await flushQueue(queue, async () => {
+      throw new Error('Arduino unreachable');
+    });
+
+    assert.equal(result.sent, 0);
+    assert.equal(result.remaining.length, 1);
+    assert.equal(result.remaining[0].payload.realtimeHeartRate, 60);
+    assert.equal(result.error, 'Arduino unreachable');
+  } finally {
+    forgetDropped(queue[1].id);
+  }
+});
 
 test('flush sends queued payloads in order and stops on the first failure', async () => {
   const queue = enqueue(enqueue([], sample(60)), sample(70));
