@@ -118,7 +118,7 @@ export default function SettingsScreen() {
             <Text style={styles.label}>Keep syncing</Text>
             <Text style={styles.body}>
               The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper downloads the stored record about every {CATCHUP_HOURS} hours, sends it, and disconnects. Opening the app runs that download when one is due. Leaving the app open does not start extra sensor checks.
-              Leave the app in the switcher. iOS chooses the wake time and will not wake the app after you swipe it away. Android shows a notification while a download is running.
+              Leave the app in the switcher. The next wake does not require opening the app. iOS chooses the time and will not wake the app after you swipe it away. The download does not wait for Wi-Fi. A notification is sent when the wake starts and when it finishes.
             </Text>
           </View>
           <Switch
@@ -142,7 +142,7 @@ export default function SettingsScreen() {
           value={factoryGestures}
         />
         <Text style={styles.body}>
-          Leave this off. Turning it on is the ring's own gesture control, and that is what skips a song when the ring moves. The app turns it off again every time it disconnects, including after a sync. Poses on the Accelerometer screen are recognized on the phone and do not use it. If a song still skips with this off, after the app has disconnected, the phone has the ring saved as a media remote. Forget the ring in the phone's Bluetooth settings and do not pair it from that list. The app connects on its own for each download.
+          Leave this off. Turning it on is the ring's own gesture control, and that is what skips a song when the ring moves. The app turns it off again every time it disconnects, including after a sync. Poses on the Accelerometer screen are recognized on the phone and do not use it. If a song still skips with this off, the phone has the ring saved as a media remote. That can stay quiet right after you tap Pair and start the next morning, when iOS connects the saved bond. Forget the ring in Bluetooth Settings and do not tap Pair. The app connects on its own for each download.
         </Text>
         {gestureNote ? <Text style={styles.body}>{gestureNote}</Text> : null}
         <Text style={styles.label}>Ring checks</Text>

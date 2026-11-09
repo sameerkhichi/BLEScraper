@@ -92,7 +92,7 @@ The ring's own heart-rate check is off until an app writes it. On the home scree
 
 With a ring selected, the phone wakes about every 4 hours even when the screen is locked and the app is not on screen. It connects, downloads the stored heart rate, steps, sleep, blood oxygen, temperature, stress, and HRV, sends them, and disconnects. It does not start a live sensor reading on that wake. The ring can be on the table. One wake reads about a week of the stored record, so a missed wake does not drop a day.
 
-iOS chooses the actual time. It needs some battery and a network, and it will not wake the app after you swipe it away in the app switcher. Opening the app again arms the next wake. Android shows a notification only while a download is running.
+iOS chooses the actual time. Keep syncing arms the first wake. After that, the next wake is scheduled without opening the app. The download does not wait for Wi-Fi. A notification is sent when the wake starts and when it finishes. iOS will not wake the app after you swipe it away in the app switcher. Android shows a notification only while a download is running.
 
 Leaving the app open does not start a repeating heart-rate, blood-oxygen, or temperature check. Opening the app runs a download when one is due. The Measure buttons run only when tapped. Turn the wakes off under Settings, Keep syncing.
 

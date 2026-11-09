@@ -4,6 +4,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-nat
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useRingServices } from '../ble/ringServices';
+import { useBackgroundWake } from '../sync/wakeLog';
 import { openRing } from '../ble/ringClient';
 import { DebugLog } from '../components/debugLogView';
 import {
@@ -70,6 +71,7 @@ function latestSpot(spots: VitalSpot[] | undefined, field: 'spo2' | 'bodyTempera
 
 export default function HomeScreen() {
   const ringServices = useRingServices();
+  const lastWake = useBackgroundWake();
   const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing, recordHeartRate, withRing } =
     useAppState();
   const [heartPhase, setHeartPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
@@ -336,7 +338,12 @@ export default function HomeScreen() {
                   About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.
                 </Text>
                 <Text style={styles.body}>
-                  A notification appears when that wake starts, separate from opening the app. iOS chooses the wake time and will not wake the app after you swipe it away. Android also shows a notification while a download is running.
+                  A notification appears when that wake starts and when it finishes. Opening the app is not required for the next one. iOS chooses the time and will not wake the app after you swipe it away. The download does not wait for Wi-Fi.
+                </Text>
+                <Text style={styles.body}>
+                  {lastWake
+                    ? `Last background wake ${new Date(lastWake.startedAt).toLocaleString()}. ${lastWake.note}`
+                    : 'No background wake yet.'}
                 </Text>
               </>
             ) : (

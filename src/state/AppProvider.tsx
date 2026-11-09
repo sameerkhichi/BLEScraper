@@ -9,6 +9,7 @@ import { getBleManager } from '../ble/manager';
 import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
+import { hydrateBackgroundWake } from '../sync/wakeLog';
 import { ensureNotificationPermission, reportBattery, reportTemperature } from '../sync/notifyBattery';
 import { enqueue, flushQueue, forgetDropped, markDropped, removeFromQueue, type PendingUpload } from '../sync/queue';
 import { ringBusy, runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
@@ -121,6 +122,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadAutoSyncState(),
         hydrateDebugLog(),
         hydrateRingServices(),
+        hydrateBackgroundWake(),
       ]);
       if (cancelled) return;
       setSettings(storedSettings);

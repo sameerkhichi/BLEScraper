@@ -6,8 +6,9 @@ import { Platform } from 'react-native';
 import { debugLog } from '../ble/debugLog';
 import { closeRing } from '../ble/ringClient';
 import { runCatchUp } from './autoSync';
-import { notifyBackgroundWake } from './notifyBattery';
+import { notifyBackgroundResult, notifyBackgroundWake } from './notifyBattery';
 import { CATCHUP_HOURS, CATCHUP_INTERVAL_MINUTES } from './schedule';
+import { recordBackgroundWake } from './wakeLog';
 
 export const AUTO_SYNC_TASK = 'blescraper-auto-sync';
 const INTERVAL_KEY = 'blescraper.backgroundInterval';
@@ -20,12 +21,21 @@ if (Platform.OS !== 'web') {
     const startedAt = new Date();
     debugLog(`Background wake at ${startedAt.toISOString()}`);
     try {
+      await recordBackgroundWake(startedAt, 'Background download started.');
       await notifyBackgroundWake(startedAt);
-      await runCatchUp();
-      return BackgroundTask.BackgroundTaskResult.Success;
+      const result = await runCatchUp();
+      const note = result.message || 'Background download finished.';
+      await recordBackgroundWake(startedAt, note);
+      await notifyBackgroundResult(note);
+      debugLog(note);
+      return result.outcome === 'failed'
+        ? BackgroundTask.BackgroundTaskResult.Failed
+        : BackgroundTask.BackgroundTaskResult.Success;
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Background sync failed.';
       debugLog(message);
+      await recordBackgroundWake(startedAt, message).catch(() => undefined);
+      await notifyBackgroundResult(message);
       return BackgroundTask.BackgroundTaskResult.Failed;
     }
   });
@@ -55,7 +65,7 @@ export async function syncBackgroundRegistration(enabled: boolean): Promise<void
       debugLog('Background sync is not available on this device.');
       return;
     }
-    const wanted = String(CATCHUP_INTERVAL_MINUTES);
+    const wanted = `${CATCHUP_INTERVAL_MINUTES}:ble`;
     const saved = await AsyncStorage.getItem(INTERVAL_KEY);
     if (registered && saved === wanted) {
       debugLog(`Background download already scheduled, about every ${CATCHUP_HOURS} hours.`);

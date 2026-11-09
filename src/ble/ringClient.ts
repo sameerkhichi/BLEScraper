@@ -99,6 +99,10 @@ type BleFailure = {
   attErrorCode?: number | null;
 };
 
+function protectedAttribute(error: BleFailure): boolean {
+  return error.attErrorCode === 5 || error.attErrorCode === 8 || error.attErrorCode === 15;
+}
+
 function describeBleError(error: BleFailure): string {
   const reason = error.reason?.trim();
   const generic = !error.message || error.message.startsWith('Unknown error occurred');
@@ -170,12 +174,19 @@ export class RingClient {
       const ring = new RingClient(device);
       client = ring;
       ring.notifying = true;
+      const dropProtected = (where: string, error: BleFailure) => {
+        if (!protectedAttribute(error)) return;
+        debugLog(`Protected attribute on ${where}. Dropping the link.`);
+        if (device) void device.cancelConnection().catch(() => undefined);
+      };
+      debugLog('Subscribing to UART notify 6E400003');
       ring.subscription = device.monitorCharacteristicForService(
         UART_SERVICE_UUID,
         UART_TX_UUID,
         (error, characteristic) => {
           if (error) {
             if (!ring.notifying) return;
+            dropProtected('UART notify 6E400003', error);
             const wrapped = new Error(`The ring stopped sending data. ${describeBleError(error)}`);
             setupFailed ??= wrapped;
             debugLog(`Notify error on ${deviceId}: ${describeBleError(error)}`);
@@ -187,12 +198,14 @@ export class RingClient {
         },
       );
       try {
+        debugLog('Subscribing to big-data notify DE5BF729');
         ring.bigDataSubscription = device.monitorCharacteristicForService(
           BIG_DATA_SERVICE_UUID,
           BIG_DATA_TX_UUID,
           (error, characteristic) => {
             if (error) {
               if (!ring.notifying) return;
+              dropProtected('big-data notify DE5BF729', error);
               debugLog(`Sleep notify error on ${deviceId}: ${describeBleError(error)}`);
               ring.failBigData(new Error(`The ring did not send sleep data. ${describeBleError(error)}`));
               return;
