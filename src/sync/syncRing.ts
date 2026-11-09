@@ -1,7 +1,7 @@
 import { CMD_READ_HRV, CMD_READ_STRESS } from '../ble/protocol';
 import { hasOpenRing, openRing, type RingClient } from '../ble/ringClient';
 import { debugLog } from '../ble/debugLog';
-import { defaultRingChecks, mergeVitalSpots, vitalSpot, type MetricSample, type RingChecks, type ScanKind, type UploadPayload, type VitalSpot } from '../model';
+import { mergeVitalSpots, vitalSpot, type MetricSample, type ScanKind, type UploadPayload, type VitalSpot } from '../model';
 import { STORED_DAYS, type SyncPlan } from './schedule';
 
 async function readMetricDays(
@@ -41,13 +41,11 @@ export async function syncRing(
   ringId: string,
   ringName: string | null,
   onStatus: (message: string) => void,
-  checks: RingChecks = defaultRingChecks,
 ): Promise<RingRead> {
   report(onStatus, hasOpenRing(ringId) ? 'Using the open connection' : 'Connecting to the ring');
   const client = await openRing(ringId);
   return collectRing(client, ringId, ringName, { logs: true, vitals: false, sleep: true }, onStatus, {
     probeWear: false,
-    checks,
   });
 }
 
@@ -57,7 +55,7 @@ export async function collectRing(
   ringName: string | null,
   plan: SyncPlan,
   onStatus: (message: string) => void,
-  options?: { probeWear?: boolean; historyDays?: number; checks?: RingChecks },
+  options?: { probeWear?: boolean; historyDays?: number },
 ): Promise<RingRead> {
   const warnings: string[] = [];
   let battery: UploadPayload['battery'] = null;
@@ -71,17 +69,6 @@ export async function collectRing(
   let spo2: number | null = null;
   let bodyTemperatureC: number | null = null;
   let vitalSpots: VitalSpot[] = [];
-
-  const checks = options?.checks ?? defaultRingChecks;
-  try {
-    report(onStatus, 'Checking the ring timer');
-    const applied = await client.applyAutomaticChecks(checks);
-    warnings.push(...applied.warnings);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'The ring checks were not updated.';
-    warnings.push(message);
-    debugLog(message);
-  }
 
   const probeWear = options?.probeWear !== false;
   let knownHeartRate: number | null = null;

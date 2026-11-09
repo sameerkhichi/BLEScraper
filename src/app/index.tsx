@@ -19,7 +19,7 @@ import {
   Thermometer,
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
-import { RING_HEART_RATE_MINUTES, stressSummary, type UploadPayload, type VitalSpot } from '../model';
+import { stressSummary, type UploadPayload, type VitalSpot } from '../model';
 import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
 import { FEVER_C, MILD_HYPOTHERMIA_C } from '../sync/temperatureAlert';
 import { pauseAutoSync } from '../sync/ringGate';
@@ -380,7 +380,7 @@ export default function HomeScreen() {
                   Leave BLEScraper in the app switcher. The screen can be off, and another app can be in front.
                 </Text>
                 <Text style={styles.body}>
-                  The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper does not take those readings on its own. Turn them on or off in Settings at the top right. Apply to ring writes them now.
+                  The ring keeps its own heart-rate interval and the blood oxygen, stress, and HRV switches. Settings at the top right reads them from the ring. A download does not write them again. BLEScraper does not take those readings on its own.
                 </Text>
                 <Text style={styles.body}>
                   About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.

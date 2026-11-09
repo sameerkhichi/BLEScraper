@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { firmwareFrom, pendingFrom } from '../ble/ringSettings';
 import {
   defaultRingChecks,
   defaultSettings,
@@ -33,7 +34,16 @@ export async function loadSettings(): Promise<AppSettings> {
     autoSync: typeof parsed.autoSync === 'boolean' ? parsed.autoSync : true,
     factoryGestures: parsed.factoryGestures === true,
     ringChecks: ringChecksFrom(parsed.ringChecks),
+    firmware: firmwareFrom(parsed.firmware),
+    pendingFirmware: pendingFrom(parsed.pendingFirmware),
   };
+}
+
+function heartRateMinutesFrom(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return RING_HEART_RATE_MINUTES;
+  const minutes = Math.round(value);
+  if (minutes < 1 || minutes > 255) return RING_HEART_RATE_MINUTES;
+  return minutes;
 }
 
 function ringChecksFrom(value: unknown): RingChecks {
@@ -41,7 +51,7 @@ function ringChecksFrom(value: unknown): RingChecks {
   const checks = value as Partial<RingChecks>;
   return {
     heartRate: typeof checks.heartRate === 'boolean' ? checks.heartRate : true,
-    heartRateMinutes: RING_HEART_RATE_MINUTES,
+    heartRateMinutes: heartRateMinutesFrom(checks.heartRateMinutes),
     spo2: typeof checks.spo2 === 'boolean' ? checks.spo2 : true,
     stress: typeof checks.stress === 'boolean' ? checks.stress : true,
     hrv: typeof checks.hrv === 'boolean' ? checks.hrv : true,

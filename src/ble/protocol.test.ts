@@ -36,15 +36,8 @@ import {
   REALTIME_TEMPERATURE,
   setTimePacket,
   startRealtimePacket,
-  CMD_AUTO_HEART_RATE,
-  CMD_AUTO_SPO2,
   CMD_READ_STRESS,
   IntervalLogParser,
-  describeAutomaticChecks,
-  parseHeartRateCheck,
-  parseToggle,
-  writeHeartRateCheckPacket,
-  writeTogglePacket,
 } from './protocol';
 
 test('battery request checksum is the command byte', () => {
@@ -307,26 +300,6 @@ test('Colmi service matching ignores case and dashes', () => {
   assert.equal(advertisesColmiService(['0000180a-0000-1000-8000-00805f9b34fb']), false);
 });
 
-test('heart-rate check write enables a 5 minute interval', () => {
-  const packet = writeHeartRateCheckPacket({ enabled: true, minutes: 5 });
-  assert.equal(packet[0], CMD_AUTO_HEART_RATE);
-  assert.deepEqual(Array.from(packet.slice(1, 4)), [2, 1, 5]);
-  assert.equal(isValidPacket(packet), true);
-  assert.deepEqual(parseHeartRateCheck(packet), { enabled: true, minutes: 5 });
-});
-
-test('a disabled heart-rate check reads back as off', () => {
-  const packet = makePacket(CMD_AUTO_HEART_RATE, [1, 2, 30]);
-  assert.deepEqual(parseHeartRateCheck(packet), { enabled: false, minutes: 30 });
-});
-
-test('blood oxygen check write uses the shared on byte', () => {
-  const packet = writeTogglePacket(CMD_AUTO_SPO2, true);
-  assert.deepEqual(Array.from(packet.slice(0, 3)), [CMD_AUTO_SPO2, 2, 1]);
-  assert.equal(isValidPacket(packet), true);
-  assert.deepEqual(parseToggle(CMD_AUTO_SPO2, makePacket(CMD_AUTO_SPO2, [1, 2])), { enabled: false });
-});
-
 test('stress log uses the header range between samples', () => {
   const parser = new IntervalLogParser();
   const header = new Uint8Array(16);
@@ -358,21 +331,6 @@ test('stress log uses the header range between samples', () => {
     { timestamp: '2024-01-01T00:00:00.000Z', value: 20 },
     { timestamp: '2024-01-01T04:30:00.000Z', value: 40 },
   ]);
-});
-
-test('check read-back names what the ring echoed', () => {
-  const described = describeAutomaticChecks({
-    heartRate: { enabled: true, minutes: 5 },
-    spo2: { enabled: true },
-    stress: { enabled: false },
-    hrv: null,
-    warnings: ['HRV was not changed.'],
-  });
-  assert.match(described, /Heart rate every 5 minutes/);
-  assert.match(described, /Blood oxygen on/);
-  assert.match(described, /Stress off/);
-  assert.match(described, /HRV is not available/);
-  assert.match(described, /HRV was not changed/);
 });
 
 test('base64 round-trips a 16-byte packet', () => {

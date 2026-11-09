@@ -1,3 +1,12 @@
+import {
+  emptyFirmware,
+  emptyPending,
+  type FirmwareRead,
+  type PendingFirmware,
+  type SettingField,
+  type SettingPatch,
+} from './ble/ringSettings';
+
 export const RING_HEART_RATE_MINUTES = 5;
 
 export type RingChecks = {
@@ -22,9 +31,11 @@ export type AppSettings = {
   ringId: string | null;
   ringName: string | null;
   autoSync: boolean;
-  // The ring's own wave detector. Phone-side poses do not use it.
+  // Last read of the ring's saved gesture switch. Phone-side poses do not use it.
   factoryGestures: boolean;
   ringChecks: RingChecks;
+  firmware: FirmwareRead;
+  pendingFirmware: PendingFirmware;
 };
 
 export type BatteryReading = {
@@ -478,4 +489,75 @@ export const defaultSettings: AppSettings = {
   autoSync: true,
   factoryGestures: false,
   ringChecks: defaultRingChecks,
+  firmware: emptyFirmware(),
+  pendingFirmware: emptyPending(),
 };
+
+export function checksFromFirmware(previous: RingChecks, read: FirmwareRead): RingChecks {
+  const minutes = read.heartRate?.minutes;
+  return {
+    heartRate: read.heartRate?.enabled ?? previous.heartRate,
+    heartRateMinutes: minutes != null && minutes > 0 ? minutes : previous.heartRateMinutes,
+    spo2: read.spo2?.enabled ?? previous.spo2,
+    stress: read.stress?.enabled ?? previous.stress,
+    hrv: read.hrv?.enabled ?? previous.hrv,
+  };
+}
+
+export function mergeFirmwareRead(settings: AppSettings, read: FirmwareRead): AppSettings {
+  return {
+    ...settings,
+    ringChecks: checksFromFirmware(settings.ringChecks, read),
+    factoryGestures: read.gesture ? read.gesture.enabled : settings.factoryGestures,
+    firmware: read,
+  };
+}
+
+export function shownChecks(settings: AppSettings): RingChecks {
+  const pending = settings.pendingFirmware;
+  const read = settings.firmware;
+  const base = settings.ringChecks;
+  const readMinutes = read.heartRate?.minutes;
+  return {
+    heartRate: pending.heartRate ?? read.heartRate?.enabled ?? base.heartRate,
+    heartRateMinutes: pending.heartRateMinutes ?? (readMinutes != null && readMinutes > 0 ? readMinutes : base.heartRateMinutes),
+    spo2: pending.spo2 ?? read.spo2?.enabled ?? base.spo2,
+    stress: pending.stress ?? read.stress?.enabled ?? base.stress,
+    hrv: pending.hrv ?? read.hrv?.enabled ?? base.hrv,
+  };
+}
+
+export function shownGesture(settings: AppSettings): boolean | null {
+  if (settings.pendingFirmware.gesture !== null) return settings.pendingFirmware.gesture;
+  if (settings.firmware.gesture) return settings.firmware.gesture.enabled;
+  return null;
+}
+
+export function clearPendingField(pending: PendingFirmware, field: SettingField): PendingFirmware {
+  if (field === 'heartRate') return { ...pending, heartRate: null, heartRateMinutes: null };
+  if (field === 'spo2') return { ...pending, spo2: null };
+  if (field === 'stress') return { ...pending, stress: null };
+  if (field === 'hrv') return { ...pending, hrv: null };
+  return { ...pending, gesture: null };
+}
+
+export function stageFirmwareChange(settings: AppSettings, field: SettingField, patch: SettingPatch): AppSettings {
+  const pending = { ...settings.pendingFirmware };
+  const ringChecks = { ...settings.ringChecks };
+  if (field === 'heartRate') {
+    pending.heartRate = patch.enabled;
+    ringChecks.heartRate = patch.enabled;
+    if (patch.minutes != null) {
+      pending.heartRateMinutes = patch.minutes;
+      ringChecks.heartRateMinutes = patch.minutes;
+    }
+    return { ...settings, pendingFirmware: pending, ringChecks };
+  }
+  if (field === 'gesture') {
+    pending.gesture = patch.enabled;
+    return { ...settings, pendingFirmware: pending, factoryGestures: patch.enabled };
+  }
+  pending[field] = patch.enabled;
+  ringChecks[field] = patch.enabled;
+  return { ...settings, pendingFirmware: pending, ringChecks };
+}

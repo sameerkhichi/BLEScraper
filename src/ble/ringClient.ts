@@ -1,6 +1,6 @@
 import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 
-import type { BatteryReading, HeartRateSample, MetricSample, RingChecks, SleepNight, StepSample, VitalSpot } from '../model';
+import type { BatteryReading, HeartRateSample, MetricSample, SleepNight, StepSample, VitalSpot } from '../model';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
 import { rememberRingServices } from './ringServices';
@@ -8,10 +8,6 @@ import { getBleManager } from './manager';
 import { isValidPacket } from './packet';
 import {
   type RawSensorFrame,
-  CMD_AUTO_HEART_RATE,
-  CMD_AUTO_HRV,
-  CMD_AUTO_SPO2,
-  CMD_AUTO_STRESS,
   CMD_BATTERY,
   CMD_GESTURE,
   CMD_RAW_SENSOR,
@@ -19,13 +15,8 @@ import {
   CMD_SET_TIME,
   CMD_START_REAL_TIME,
   CMD_STEPS,
-  type AutomaticChecks,
-  type HeartRateCheck,
   HeartRateLogParser,
   IntervalLogParser,
-  type ToggleCheck,
-  writeHeartRateCheckPacket,
-  writeTogglePacket,
   RAW_SENSOR_DISABLE,
   RAW_SENSOR_ENABLE,
   REALTIME_HEART_RATE,
@@ -45,25 +36,33 @@ import {
   classifyWear,
   isPlausibleSpo2,
   parseBattery,
-  parseHeartRateCheck,
   parseLiveHeartRate,
   parseLiveStress,
-  parseToggle,
   gesturePacket,
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
-  readHeartRateCheckPacket,
   readHeartRatePacket,
   readSeriesPacket,
   readStepsPacket,
-  readTogglePacket,
   setTimePacket,
   smoothHeartRate,
   startHeartRatePacket,
   startRealtimePacket,
   stopRealtimePacket,
 } from './protocol';
+import {
+  CMD_PALM,
+  commandFor,
+  parseSetting,
+  readSettingPacket,
+  settingMatches,
+  writeSettingPacket,
+  type FirmwareRead,
+  type ParsedSetting,
+  type SettingField,
+  type SettingPatch,
+} from './ringSettings';
 import {
   BIG_DATA_RX_UUID,
   BIG_DATA_SERVICE_UUID,
@@ -319,26 +318,68 @@ export class RingClient {
     });
   }
 
-  async applyAutomaticChecks(desired: RingChecks): Promise<AutomaticChecks> {
+  async readFirmware(): Promise<FirmwareRead> {
     return this.run(async () => {
-      const current = await this.readAutomaticChecks([]);
       const warnings: string[] = [];
-      if (current.heartRate.enabled !== desired.heartRate || current.heartRate.minutes !== desired.heartRateMinutes) {
-        try {
-          await this.request(
-            CMD_AUTO_HEART_RATE,
-            writeHeartRateCheckPacket({ enabled: desired.heartRate, minutes: desired.heartRateMinutes }),
-            (packet) => parseHeartRateCheck(packet),
-            SHORT_TIMEOUT_MS,
-          );
-        } catch (error) {
-          warnings.push(error instanceof Error ? error.message : 'Heart rate checks were not changed.');
+      const heartRate = await this.readParsed(commandFor('heartRate'), 'Heart rate', warnings);
+      const spo2 = await this.readParsed(commandFor('spo2'), 'Blood oxygen', warnings);
+      const stress = await this.readParsed(commandFor('stress'), 'Stress', warnings);
+      const hrv = await this.readParsed(commandFor('hrv'), 'HRV', warnings);
+      const gesture = await this.readGestureSetting(warnings);
+      return {
+        readAt: new Date().toISOString(),
+        heartRate,
+        spo2,
+        stress,
+        hrv,
+        hrvAnswered: hrv !== null,
+        gesture: gesture?.parsed ?? null,
+        gestureCommand: gesture?.command ?? null,
+        warnings,
+      };
+    });
+  }
+
+  async writeFirmwareField(current: FirmwareRead, field: SettingField, patch: SettingPatch): Promise<FirmwareRead> {
+    return this.run(async () => {
+      const warnings: string[] = [];
+      let command = field === 'gesture' ? current.gestureCommand : commandFor(field);
+      let baseline = current;
+      if (field === 'gesture' && command == null) {
+        const found = await this.readGestureSetting(warnings);
+        if (!found) {
+          warnings.push('The ring did not answer, so gesture control was left as it is.');
+          return { ...current, warnings };
         }
+        command = found.command;
+        baseline = { ...current, gesture: found.parsed, gestureCommand: found.command };
       }
-      await this.syncToggle(CMD_AUTO_SPO2, desired.spo2, current.spo2.enabled, 'Blood oxygen', warnings);
-      await this.syncToggle(CMD_AUTO_STRESS, desired.stress, current.stress.enabled, 'Stress', warnings);
-      await this.syncToggle(CMD_AUTO_HRV, desired.hrv, current.hrv?.enabled ?? null, 'HRV', warnings);
-      return this.readAutomaticChecks(warnings);
+      if (command == null) return { ...current, warnings };
+      if (field === 'hrv') {
+        const answered = await this.readParsed(command, 'HRV', warnings, true);
+        if (!answered) {
+          warnings.push('HRV was not written because the ring did not answer.');
+          return { ...baseline, hrv: null, hrvAnswered: false, warnings };
+        }
+        baseline = { ...baseline, hrv: answered, hrvAnswered: true };
+      }
+      const previous = (await this.readParsed(command, fieldLabel(field), warnings, true)) ?? settingFor(baseline, field);
+      if (!previous) {
+        warnings.push(`${fieldLabel(field)} was not written because the ring did not answer.`);
+        return { ...baseline, warnings };
+      }
+      let confirmed = await this.writeAndConfirm(command, writeSettingPacket(command, previous, patch));
+      if (confirmed && !patch.enabled && confirmed.enabled && (patch.offByte ?? previous.offByte) !== 0x00) {
+        confirmed = await this.writeAndConfirm(command, writeSettingPacket(command, previous, { ...patch, offByte: 0x00 }));
+      }
+      if (!confirmed) {
+        warnings.push(`${fieldLabel(field)} was not read back.`);
+        return { ...baseline, warnings };
+      }
+      if (!settingMatches(confirmed, patch)) {
+        warnings.push(`${fieldLabel(field)} still shows the previous value.`);
+      }
+      return placeSetting(baseline, field, confirmed, command, warnings);
     });
   }
 
@@ -783,59 +824,36 @@ export class RingClient {
     return result;
   }
 
-  private async readAutomaticChecks(warnings: string[]): Promise<AutomaticChecks> {
-    const heartRate = await this.readHeartRateCheck(warnings);
-    const spo2 = (await this.readToggle(CMD_AUTO_SPO2, 'Blood oxygen', warnings)) ?? { enabled: false };
-    const stress = (await this.readToggle(CMD_AUTO_STRESS, 'Stress', warnings)) ?? { enabled: false };
-    const hrv = await this.readToggle(CMD_AUTO_HRV, 'HRV', warnings);
-    return { heartRate, spo2, stress, hrv, warnings };
-  }
-
-  private async readHeartRateCheck(warnings: string[]): Promise<HeartRateCheck> {
+  private async readParsed(command: number, label: string, warnings: string[], quiet = false): Promise<ParsedSetting | null> {
     try {
-      return await this.request(
-        CMD_AUTO_HEART_RATE,
-        readHeartRateCheckPacket(),
-        (packet) => parseHeartRateCheck(packet),
-        SHORT_TIMEOUT_MS,
-      );
+      return await this.request(command, readSettingPacket(command), (packet) => parseSetting(packet, command), SHORT_TIMEOUT_MS);
     } catch (error) {
-      warnings.push(error instanceof Error ? error.message : 'Heart rate checks were not read.');
-      return { enabled: false, minutes: 0 };
-    }
-  }
-
-  private async readToggle(command: number, label: string, warnings: string[]): Promise<ToggleCheck | null> {
-    try {
-      return await this.request(
-        command,
-        readTogglePacket(command),
-        (packet) => parseToggle(command, packet),
-        SHORT_TIMEOUT_MS,
-      );
-    } catch (error) {
-      warnings.push(error instanceof Error ? error.message : `${label} checks were not read.`);
+      if (!quiet) warnings.push(error instanceof Error ? error.message : `${label} was not read.`);
       return null;
     }
   }
 
-  private async syncToggle(
-    command: number,
-    desired: boolean,
-    current: boolean | null,
-    label: string,
-    warnings: string[],
-  ): Promise<void> {
-    if (current === desired) return;
+  private async readGestureSetting(warnings: string[]): Promise<{ command: number; parsed: ParsedSetting } | null> {
+    for (const command of [CMD_PALM, CMD_GESTURE]) {
+      const parsed = await this.readParsed(command, 'Gesture control', warnings, true);
+      if (parsed) return { command, parsed };
+    }
+    warnings.push('The ring did not answer gesture control.');
+    return null;
+  }
+
+  private async writeAndConfirm(command: number, packet: Uint8Array): Promise<ParsedSetting | null> {
+    let echoed: ParsedSetting | null = null;
     try {
-      await this.request(
-        command,
-        writeTogglePacket(command, desired),
-        (packet) => parseToggle(command, packet),
-        SHORT_TIMEOUT_MS,
-      );
+      echoed = await this.request(command, packet, (incoming) => parseSetting(incoming, command), SHORT_TIMEOUT_MS);
     } catch (error) {
-      warnings.push(error instanceof Error ? error.message : `${label} checks were not changed.`);
+      debugLog(error instanceof Error ? error.message : `Command ${command} was not acknowledged.`);
+    }
+    try {
+      return await this.request(command, readSettingPacket(command), (incoming) => parseSetting(incoming, command), SHORT_TIMEOUT_MS);
+    } catch (error) {
+      debugLog(error instanceof Error ? error.message : `Command ${command} was not read back.`);
+      return echoed;
     }
   }
 
@@ -1034,17 +1052,63 @@ export async function openRing(ringId: string): Promise<RingClient> {
   }
 }
 
+function fieldLabel(field: SettingField): string {
+  switch (field) {
+    case 'heartRate':
+      return 'Heart rate';
+    case 'spo2':
+      return 'Blood oxygen';
+    case 'stress':
+      return 'Stress';
+    case 'hrv':
+      return 'HRV';
+    case 'gesture':
+      return 'Gesture control';
+  }
+}
+
+function settingFor(read: FirmwareRead, field: SettingField): ParsedSetting | null {
+  switch (field) {
+    case 'heartRate':
+      return read.heartRate;
+    case 'spo2':
+      return read.spo2;
+    case 'stress':
+      return read.stress;
+    case 'hrv':
+      return read.hrv;
+    case 'gesture':
+      return read.gesture;
+  }
+}
+
+function placeSetting(
+  current: FirmwareRead,
+  field: SettingField,
+  parsed: ParsedSetting,
+  command: number,
+  warnings: string[],
+): FirmwareRead {
+  const next: FirmwareRead = { ...current, warnings, readAt: new Date().toISOString() };
+  if (field === 'heartRate') next.heartRate = parsed;
+  if (field === 'spo2') next.spo2 = parsed;
+  if (field === 'stress') next.stress = parsed;
+  if (field === 'hrv') {
+    next.hrv = parsed;
+    next.hrvAnswered = true;
+  }
+  if (field === 'gesture') {
+    next.gesture = parsed;
+    next.gestureCommand = command;
+  }
+  return next;
+}
+
 export async function closeRing(ringId?: string): Promise<boolean> {
   const current = openSession;
   if (!current) return false;
   if (ringId && current.ringId !== ringId) return false;
   openSession = null;
-  try {
-    await current.client.setWaveDetector(false);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'could not disarm the ring';
-    debugLog(`Wave detector was still armed at disconnect: ${message}`);
-  }
   await current.client.disconnect();
   return true;
 }

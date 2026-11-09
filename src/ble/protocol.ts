@@ -23,10 +23,6 @@ export const CMD_READ_STRESS = 0x37;
 export const CMD_AUTO_HRV = 0x38;
 export const CMD_READ_HRV = 0x39;
 export const CMD_STEPS = 67;
-export const PREF_READ = 1;
-export const PREF_WRITE = 2;
-export const PREF_ENABLED = 1;
-export const PREF_DISABLED = 2;
 export const CMD_START_REAL_TIME = 105;
 export const CMD_STOP_REAL_TIME = 106;
 export const CMD_RAW_SENSOR = 0xa1;
@@ -111,71 +107,9 @@ export function stopRealtimePacket(readingType: number): Uint8Array {
   return makePacket(CMD_STOP_REAL_TIME, [readingType, 0, 0]);
 }
 
-export type HeartRateCheck = {
-  enabled: boolean;
-  minutes: number;
-};
-
-export type ToggleCheck = {
-  enabled: boolean;
-};
-
-export type AutomaticChecks = {
-  heartRate: HeartRateCheck;
-  spo2: ToggleCheck;
-  stress: ToggleCheck;
-  hrv: ToggleCheck | null;
-  warnings: string[];
-};
-
-export function readHeartRateCheckPacket(): Uint8Array {
-  return makePacket(CMD_AUTO_HEART_RATE, [PREF_READ]);
-}
-
-export function writeHeartRateCheckPacket(check: HeartRateCheck): Uint8Array {
-  const minutes = Math.min(255, Math.max(1, Math.round(check.minutes)));
-  return makePacket(CMD_AUTO_HEART_RATE, [PREF_WRITE, check.enabled ? PREF_ENABLED : PREF_DISABLED, minutes]);
-}
-
-export function parseHeartRateCheck(packet: Uint8Array): HeartRateCheck | null {
-  if (packet[0] !== CMD_AUTO_HEART_RATE) return null;
-  return {
-    enabled: packet[2] === PREF_ENABLED,
-    minutes: packet[3] ?? 0,
-  };
-}
-
-export function readTogglePacket(command: number): Uint8Array {
-  return makePacket(command, [PREF_READ]);
-}
-
-export function writeTogglePacket(command: number, enabled: boolean): Uint8Array {
-  return makePacket(command, [PREF_WRITE, enabled ? PREF_ENABLED : PREF_DISABLED]);
-}
-
-export function parseToggle(command: number, packet: Uint8Array): ToggleCheck | null {
-  if (packet[0] !== command) return null;
-  return { enabled: packet[2] === PREF_ENABLED };
-}
-
 export function readSeriesPacket(command: number, day: Date): Uint8Array {
   const midnight = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
   return makePacket(command, writeInt32LE(Math.floor(midnight / 1000)));
-}
-
-export function describeAutomaticChecks(report: AutomaticChecks): string {
-  const heart = report.heartRate.enabled
-    ? `Heart rate every ${report.heartRate.minutes} minutes`
-    : 'Heart rate off';
-  const hrv = report.hrv ? (report.hrv.enabled ? 'HRV on' : 'HRV off') : 'HRV is not available on this ring';
-  const sentence = [
-    heart,
-    report.spo2.enabled ? 'Blood oxygen on' : 'Blood oxygen off',
-    report.stress.enabled ? 'Stress on' : 'Stress off',
-    hrv,
-  ].join('. ');
-  const warnings = report.warnings.filter((warning) => warning.length > 0);
-  return warnings.length > 0 ? `${sentence}. ${warnings.join(' ')}` : `${sentence}.`;
 }
 
 export function parseRealtime(packet: Uint8Array):

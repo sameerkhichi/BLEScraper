@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-native';
 
-import { openRing } from '../ble/ringClient';
+import { HEART_RATE_INTERVALS, hasPendingFirmware } from '../ble/ringSettings';
 import { Button, colors } from '../components/ui';
-import { RING_HEART_RATE_MINUTES, type RingChecks } from '../model';
+import { shownChecks, shownGesture } from '../model';
 import { LOW_BATTERY_PERCENT, LOW_BATTERY_REMIND_HOURS } from '../sync/batteryAlert';
 import { CATCHUP_HOURS } from '../sync/schedule';
 import {
@@ -17,62 +17,62 @@ import {
 import { useAppState } from '../state/AppProvider';
 
 export default function ControlsScreen() {
-  const { busy, settings, saveAppSettings, applyRingChecks, withRing } = useAppState();
+  const { busy, settings, saveAppSettings, readRingFirmware, writeRingField, applyRingChecks } = useAppState();
   const [autoSync, setAutoSync] = useState(settings.autoSync);
-  const [factoryGestures, setFactoryGestures] = useState(settings.factoryGestures);
-  const [checks, setChecks] = useState<RingChecks>(settings.ringChecks);
+  const [liveRead, setLiveRead] = useState(false);
   const [checkNote, setCheckNote] = useState('');
   const [gestureNote, setGestureNote] = useState('');
+  const checks = shownChecks(settings);
+  const gesture = shownGesture(settings);
+  const pending = hasPendingFirmware(settings.pendingFirmware);
+  const hrvUnanswered = Boolean(settings.firmware.readAt) && !settings.firmware.hrv && settings.pendingFirmware.hrv === null;
 
   useEffect(() => {
     setAutoSync(settings.autoSync);
-    setFactoryGestures(settings.factoryGestures);
-    setChecks(settings.ringChecks);
-  }, [settings.autoSync, settings.factoryGestures, settings.ringChecks]);
+  }, [settings.autoSync]);
+
+  useEffect(() => {
+    if (!settings.ringId) return;
+    let cancelled = false;
+    void readRingFirmware()
+      .then((message) => {
+        if (cancelled) return;
+        setLiveRead(true);
+        setCheckNote(message);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setLiveRead(false);
+        setCheckNote(error instanceof Error ? error.message : 'The ring did not answer.');
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [readRingFirmware, settings.ringId]);
 
   const toggleAutoSync = (value: boolean) => {
     setAutoSync(value);
     void saveAppSettings({ ...settings, autoSync: value });
   };
 
-  const toggleFactoryGestures = (value: boolean) => {
-    setFactoryGestures(value);
-    setGestureNote('');
-    void (async () => {
-      await saveAppSettings({ ...settings, factoryGestures: value, ringChecks: checks });
-      if (!settings.ringId) {
-        setGestureNote('Saved. It is written the next time the ring connects.');
-        return;
-      }
-      try {
-        await withRing(async () => {
-          const client = await openRing(settings.ringId as string);
-          await client.setWaveDetector(value);
-        });
-        setGestureNote(
-          value
-            ? 'Armed until this connection ends. The app turns it off again on disconnect.'
-            : 'Factory gesture control is off. It is written again when the app disconnects.',
-        );
-      } catch (error) {
-        setGestureNote(error instanceof Error ? error.message : 'The ring did not update. The choice is saved for the next connection.');
-      }
-    })();
+  const noteWrite = (message: string) => {
+    setCheckNote(message);
+    if (!message.includes('Saved on the phone')) setLiveRead(true);
   };
 
-  const updateCheck = (key: 'heartRate' | 'spo2' | 'stress' | 'hrv', value: boolean) => {
-    const next = { ...checks, [key]: value, heartRateMinutes: RING_HEART_RATE_MINUTES };
-    setChecks(next);
-    void saveAppSettings({ ...settings, ringChecks: next });
+  const changeCheck = (field: 'spo2' | 'stress' | 'hrv', enabled: boolean) => {
+    void writeRingField(field, { enabled }).then(noteWrite);
   };
 
-  const apply = async () => {
-    const next = { ...checks, heartRateMinutes: RING_HEART_RATE_MINUTES };
-    await saveAppSettings({ ...settings, ringChecks: next });
+  const writeSaved = async () => {
     try {
-      setCheckNote(await applyRingChecks());
+      const message = pending ? await applyRingChecks() : await readRingFirmware();
+      setLiveRead(true);
+      setCheckNote(message);
+      setGestureNote('');
     } catch (error) {
-      setCheckNote(error instanceof Error ? error.message : 'The ring checks were not updated.');
+      setLiveRead(false);
+      setCheckNote(error instanceof Error ? error.message : 'The ring settings were not updated.');
     }
   };
 
@@ -82,7 +82,7 @@ export default function ControlsScreen() {
         <View style={styles.rowText}>
           <Text style={styles.label}>Automatic background sync</Text>
           <Text style={styles.body}>
-            The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper downloads the stored record about every {CATCHUP_HOURS} hours, sends it, and disconnects. Opening the app runs that download when one is due. Leaving the app open does not start extra sensor checks. Leave the app in the switcher. The next wake does not require opening the app. iOS chooses the time and will not wake the app after you swipe it away. The download does not wait for Wi-Fi. A notification is sent when the wake starts and when it finishes.
+            BLEScraper downloads the stored record about every {CATCHUP_HOURS} hours, sends it, and disconnects. Opening the app runs that download when one is due. Leaving the app open does not start extra sensor checks. Leave the app in the switcher. The next wake does not require opening the app. iOS chooses the time and will not wake the app after you swipe it away. The download does not wait for Wi-Fi. A notification is sent when the wake starts and when it finishes. A download reads the stored record and does not change the ring's settings.
           </Text>
         </View>
         <Switch
@@ -101,37 +101,107 @@ export default function ControlsScreen() {
       </Text>
 
       <Text style={styles.label}>Factory gesture control</Text>
-      <CheckRow label="Factory gesture control" onValueChange={toggleFactoryGestures} value={factoryGestures} />
+      {gesture === null ? (
+        <Text style={styles.body}>
+          {settings.firmware.readAt
+            ? 'The ring did not answer. Gesture control was left as it is.'
+            : 'Gesture control has not been read from the ring yet.'}
+        </Text>
+      ) : (
+        <CheckRow
+          disabled={busy}
+          label="Factory gesture control"
+          onValueChange={(value) => {
+            void writeRingField('gesture', { enabled: value }).then((message) => {
+            setGestureNote(message);
+            if (!message.includes('Saved on the phone')) setLiveRead(true);
+          });
+          }}
+          value={gesture}
+        />
+      )}
       <Text style={styles.body}>
-        Leave this off. Turning it on is the ring's own gesture control, and that is what skips a song when the ring moves. The app turns it off again every time it disconnects, including after a sync. Poses on the Accelerometer screen are recognized on the phone and do not use it. If a song still skips with this off, the phone has the ring saved as a media remote. That can stay quiet right after you tap Pair and start the next morning, when iOS connects the saved bond. Forget the ring in Bluetooth Settings and do not tap Pair. The app connects on its own for each download.
+        This switch is the on/off saved on the ring. A download does not change it, and disconnecting does not turn it off. What a wave does on the phone, such as skipping a song, comes from an iOS Bluetooth bond, not from this switch. Poses on the Accelerometer screen are recognized on the phone. If a song still skips with this off, forget the ring in Bluetooth Settings and do not tap Pair.
       </Text>
       {gestureNote ? <Text style={styles.body}>{gestureNote}</Text> : null}
 
       <Text style={styles.label}>Ring frequency checks</Text>
+      <Text style={styles.body}>{firmwareLabel(settings.firmware.readAt, liveRead, pending)}</Text>
       <Text style={styles.body}>
-        These run on the ring after the phone disconnects. Heart rate is every {RING_HEART_RATE_MINUTES} minutes. The other three follow that cycle. Apply writes them now. The next download writes them again if the ring disagrees.
+        Heart rate, blood oxygen, stress, and HRV are stored on the ring. They stay there with the power off, after the phone disconnects, and after Disconnect ring. Choosing the ring again reads them. The phone keeps the last successful read and does not write its own defaults over the ring. A download only reads logs.
       </Text>
       <CheckRow
-        label={`Heart rate every ${RING_HEART_RATE_MINUTES} minutes`}
-        onValueChange={(value) => updateCheck('heartRate', value)}
+        disabled={busy}
+        label="Heart rate"
+        onValueChange={(value) => {
+          void writeRingField('heartRate', { enabled: value, minutes: checks.heartRateMinutes }).then(noteWrite);
+        }}
         value={checks.heartRate}
       />
-      <CheckRow label="Blood oxygen" onValueChange={(value) => updateCheck('spo2', value)} value={checks.spo2} />
-      <CheckRow label="Stress" onValueChange={(value) => updateCheck('stress', value)} value={checks.stress} />
-      <CheckRow label="HRV" onValueChange={(value) => updateCheck('hrv', value)} value={checks.hrv} />
+      <Text style={styles.body}>Heart rate interval</Text>
+      <View style={styles.intervals}>
+        {HEART_RATE_INTERVALS.map((minutes) => {
+          const selected = checks.heartRateMinutes === minutes;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              disabled={busy}
+              key={minutes}
+              onPress={() => {
+                void writeRingField('heartRate', { enabled: checks.heartRate, minutes }).then(noteWrite);
+              }}
+              style={[styles.interval, selected && styles.intervalSelected]}
+            >
+              <Text style={[styles.intervalLabel, selected && styles.intervalLabelSelected]}>{minutes} min</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      {HEART_RATE_INTERVALS.every((minutes) => minutes !== checks.heartRateMinutes) ? (
+        <Text style={styles.body}>The ring last reported {checks.heartRateMinutes} minutes.</Text>
+      ) : null}
+      <Text style={styles.body}>
+        Five minutes fills every stored heart-rate slot. Fifteen, thirty, and sixty are the other choices. Fifteen is the cadence often seen on an R09.
+      </Text>
+      <CheckRow disabled={busy} label="Blood oxygen" onValueChange={(value) => changeCheck('spo2', value)} value={checks.spo2} />
+      <CheckRow disabled={busy} label="Stress" onValueChange={(value) => changeCheck('stress', value)} value={checks.stress} />
+      {hrvUnanswered ? (
+        <Text style={styles.body}>HRV did not answer. It was left as it is.</Text>
+      ) : (
+        <CheckRow disabled={busy} label="HRV" onValueChange={(value) => changeCheck('hrv', value)} value={checks.hrv} />
+      )}
+      <Text style={styles.body}>
+        Blood oxygen, stress, and HRV have no interval here. The firmware picks the cadence. Stress is about every 30 minutes, HRV about every 60, blood oxygen about hourly, and skin temperature about every 30. Those are observed values, not settings.
+      </Text>
       {checkNote ? <Text style={styles.body}>{checkNote}</Text> : null}
-      <Button disabled={busy} label="Apply to ring" onPress={() => void apply()} tone="secondary" />
+      <Button
+        disabled={busy}
+        label={pending ? 'Write changes to the ring' : 'Read from ring'}
+        onPress={() => void writeSaved()}
+        tone="secondary"
+      />
     </ScrollView>
   );
+}
+
+function firmwareLabel(readAt: string | null, live: boolean, pending: boolean): string {
+  if (!readAt) return 'Not read from the ring yet.';
+  const when = new Date(readAt).toLocaleString();
+  if (pending) return `Last read from the ring ${when}. A change is saved on the phone until you write it.`;
+  if (live) return `Read from the ring ${when}.`;
+  return `Last read from the ring ${when}.`;
 }
 
 function CheckRow({
   label,
   value,
+  disabled,
   onValueChange,
 }: {
   label: string;
   value: boolean;
+  disabled?: boolean;
   onValueChange: (value: boolean) => void;
 }) {
   return (
@@ -139,6 +209,7 @@ function CheckRow({
       <Text style={[styles.body, styles.rowText]}>{label}</Text>
       <Switch
         accessibilityLabel={label}
+        disabled={disabled}
         onValueChange={onValueChange}
         thumbColor={colors.text}
         trackColor={{ false: colors.line, true: colors.accent }}
@@ -178,5 +249,28 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginTop: 8,
     textTransform: 'uppercase',
+  },
+  intervals: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  interval: {
+    borderColor: colors.line,
+    borderRadius: 8,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  intervalSelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  intervalLabel: {
+    color: colors.text,
+    fontSize: 16,
+  },
+  intervalLabelSelected: {
+    color: colors.accentText,
   },
 });

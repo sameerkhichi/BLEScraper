@@ -107,7 +107,7 @@ export async function runCatchUp(): Promise<AutoSyncResult> {
         current.ringName,
         { logs: true, vitals: false, sleep: true },
         report,
-        { probeWear: false, historyDays: STORED_DAYS, checks: current.ringChecks },
+        { probeWear: false, historyDays: STORED_DAYS },
       );
       const downloaded = collected.payload;
       await closeRing();
@@ -202,7 +202,6 @@ export async function runAutoSync(options: { allowAndroidService: boolean }): Pr
       const client = await openRing(ringId);
       const collected = await collectRing(client, ringId, current.ringName, plan.plan, report, {
         probeWear: false,
-        checks: current.ringChecks,
       });
       if (!collected.worn) {
         await closeRing();

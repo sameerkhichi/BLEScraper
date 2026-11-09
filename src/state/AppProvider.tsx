@@ -2,11 +2,33 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { AppState } from 'react-native';
 
 import { closeRing, openRing } from '../ble/ringClient';
-import { describeAutomaticChecks } from '../ble/protocol';
+import {
+  describeFirmware,
+  emptyPending,
+  settingMatches,
+  type FirmwareRead,
+  type ParsedSetting,
+  type SettingField,
+  type SettingPatch,
+} from '../ble/ringSettings';
 import { debugLog, flushDebugLog, hydrateDebugLog } from '../ble/debugLog';
 import { clearRingServices, hydrateRingServices } from '../ble/ringServices';
 import { getBleManager } from '../ble/manager';
-import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
+import {
+  clearPendingField,
+  keepSleepRecord,
+  keepStoredSamples,
+  mergeFirmwareRead,
+  mergeReadings,
+  shownChecks,
+  shownGesture,
+  stageFirmwareChange,
+  defaultSettings,
+  type AccelSample,
+  type AppSettings,
+  type ScanKind,
+  type UploadPayload,
+} from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
 import { hydrateBackgroundWake } from '../sync/wakeLog';
@@ -45,6 +67,8 @@ type AppContextValue = {
   sendPending: () => Promise<void>;
   removePending: (id: string) => Promise<void>;
   clearPending: () => Promise<void>;
+  readRingFirmware: () => Promise<string>;
+  writeRingField: (field: SettingField, patch: SettingPatch) => Promise<string>;
   applyRingChecks: () => Promise<string>;
 };
 
@@ -217,14 +241,87 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const rememberFirmware = useCallback(async (read: FirmwareRead) => {
+    const latest = await loadSettings();
+    const next = mergeFirmwareRead(latest, read);
+    setSettings(next);
+    await saveSettings(next);
+    const message = describeFirmware(read);
+    setStatus(message);
+    return message;
+  }, []);
+
+  const pullFirmware = useCallback(
+    async (ringId: string): Promise<string> => {
+      setStatus('Reading the ring settings');
+      const client = await openRing(ringId);
+      const read = await client.readFirmware();
+      return rememberFirmware(read);
+    },
+    [rememberFirmware],
+  );
+
+  const readRingFirmware = useCallback(async (): Promise<string> => {
+    const stored = await loadSettings();
+    if (!stored.ringId) return 'Choose a ring to read its settings.';
+    return withRing(() => pullFirmware(stored.ringId as string));
+  }, [pullFirmware, withRing]);
+
+  const writeRingField = useCallback(
+    async (field: SettingField, patch: SettingPatch): Promise<string> => {
+      try {
+        return await withRing(async () => {
+          const latest = await loadSettings();
+          const optimistic = stageFirmwareChange(latest, field, patch);
+          setSettings(optimistic);
+          await saveSettings(optimistic);
+          if (!latest.ringId) {
+            return 'Saved on the phone. It is written when the ring is in range and you write the change.';
+          }
+          try {
+            setStatus('Writing the ring setting');
+            const client = await openRing(latest.ringId);
+            const read = await client.writeFirmwareField(optimistic.firmware, field, patch);
+            const saved = await loadSettings();
+            const echoed = settingOf(read, field);
+            const accepted = echoed !== null && settingMatches(echoed, patch);
+            const next = {
+              ...mergeFirmwareRead(saved, read),
+              pendingFirmware: accepted ? clearPendingField(saved.pendingFirmware, field) : saved.pendingFirmware,
+            };
+            setSettings(next);
+            await saveSettings(next);
+            const message = describeFirmware(read);
+            setStatus(message);
+            return message;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : 'The ring did not answer.';
+            return `${message} Saved on the phone until the ring is in range.`;
+          }
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'The ring did not answer.';
+        return `${message} Saved on the phone until the ring is in range.`;
+      }
+    },
+    [withRing],
+  );
+
   const applyRingChecks = useCallback(async (): Promise<string> => {
     const stored = await loadSettings();
-    if (!stored.ringId) return 'Choose a ring before applying checks.';
+    if (!stored.ringId) return 'Choose a ring before writing settings.';
     return withRing(async () => {
-      setStatus('Writing the ring checks');
-      const client = await openRing(stored.ringId as string);
-      const report = await client.applyAutomaticChecks(stored.ringChecks);
-      const message = describeAutomaticChecks(report);
+      const latest = await loadSettings();
+      setStatus('Writing the ring settings');
+      const client = await openRing(latest.ringId as string);
+      let read = await client.readFirmware();
+      for (const field of pendingFields(latest)) {
+        read = await client.writeFirmwareField(read, field, patchFor(latest, field));
+      }
+      const next = { ...mergeFirmwareRead(latest, read), pendingFirmware: emptyPending() };
+      setSettings(next);
+      await saveSettings(next);
+      const message = describeFirmware(read);
       setStatus(message);
       return message;
     });
@@ -270,11 +367,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
           await releaseRing(previous);
           clearRingServices();
         }
-        setStatus(`Saved ${ringName || 'ring'}.`);
-        debugLog(`Selected ${ringName || ringId}`);
+        try {
+          const message = await pullFirmware(ringId);
+          debugLog(`Selected ${ringName || ringId}. ${message}`);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'The ring settings were not read.';
+          setStatus(`Saved ${ringName || 'ring'}. ${message}`);
+          debugLog(`Selected ${ringName || ringId}. ${message}`);
+        } finally {
+          await closeRing();
+        }
       });
     },
-    [releaseRing],
+    [pullFirmware, releaseRing],
   );
 
   const forgetRing = useCallback(async () => {
@@ -299,7 +404,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       try {
         const previous = await loadLastPayload();
-        const collected = await syncRing(stored.ringId, stored.ringName, setStatus, stored.ringChecks);
+        const collected = await syncRing(stored.ringId, stored.ringName, setStatus);
         await closeRing();
         if (!collected.worn) {
           if (!collected.sleepLoaded) {
@@ -512,6 +617,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendPending,
       removePending,
       clearPending,
+      readRingFirmware,
+      writeRingField,
       applyRingChecks,
     }),
     [
@@ -533,11 +640,46 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendPending,
       removePending,
       clearPending,
+      readRingFirmware,
+      writeRingField,
       applyRingChecks,
     ],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+}
+
+function pendingFields(settings: AppSettings): SettingField[] {
+  const pending = settings.pendingFirmware;
+  const fields: SettingField[] = [];
+  if (pending.heartRate !== null || pending.heartRateMinutes !== null) fields.push('heartRate');
+  if (pending.spo2 !== null) fields.push('spo2');
+  if (pending.stress !== null) fields.push('stress');
+  if (pending.hrv !== null) fields.push('hrv');
+  if (pending.gesture !== null) fields.push('gesture');
+  return fields;
+}
+
+function settingOf(read: FirmwareRead, field: SettingField): ParsedSetting | null {
+  switch (field) {
+    case 'heartRate':
+      return read.heartRate;
+    case 'spo2':
+      return read.spo2;
+    case 'stress':
+      return read.stress;
+    case 'hrv':
+      return read.hrv;
+    case 'gesture':
+      return read.gesture;
+  }
+}
+
+function patchFor(settings: AppSettings, field: SettingField): SettingPatch {
+  const checks = shownChecks(settings);
+  if (field === 'heartRate') return { enabled: checks.heartRate, minutes: checks.heartRateMinutes };
+  if (field === 'gesture') return { enabled: shownGesture(settings) ?? false };
+  return { enabled: checks[field] };
 }
 
 export function useAppState(): AppContextValue {
