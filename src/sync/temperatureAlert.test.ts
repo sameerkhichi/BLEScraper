@@ -21,16 +21,16 @@ function notice(stage: TemperatureNotice['stage'], celsius: number, minutesAgo: 
 }
 
 test('finger thresholds land on the stated fahrenheit points', () => {
-  assert.equal(fahrenheit(36.4), 97.5);
+  assert.equal(fahrenheit(38), 100.4);
   assert.equal(fahrenheit(35), 95);
   assert.equal(fahrenheit(32), 89.6);
   assert.equal(fahrenheit(28), 82.4);
 });
 
 test('stages split fever from the hypothermia lines', () => {
-  assert.equal(temperatureStage(36.5), 'fever');
-  assert.equal(temperatureStage(36.4), 'fever');
-  assert.equal(temperatureStage(36.3), 'normal');
+  assert.equal(temperatureStage(38.2), 'fever');
+  assert.equal(temperatureStage(38), 'fever');
+  assert.equal(temperatureStage(37.9), 'normal');
   assert.equal(temperatureStage(35), 'normal');
   assert.equal(temperatureStage(34.9), 'mild');
   assert.equal(temperatureStage(32), 'mild');
@@ -46,17 +46,17 @@ test('a missing reading leaves the last notice alone', () => {
 });
 
 test('a normal reading clears an alert', () => {
-  const previous = notice('fever', 36.8, 10);
+  const previous = notice('fever', 38.4, 10);
   assert.deepEqual(nextTemperatureNotice(36, previous, now), { notify: false, next: null });
   assert.deepEqual(nextTemperatureNotice(35, null, now), { notify: false, next: null });
 });
 
 test('the first critical reading notifies', () => {
-  const fever = nextTemperatureNotice(36.4, null, now);
+  const fever = nextTemperatureNotice(38, null, now);
   assert.equal(fever.notify, true);
   assert.equal(fever.next?.stage, 'fever');
-  assert.equal(temperatureAlertCopy(36.4).title, 'Body temperature is high');
-  assert.equal(temperatureAlertCopy(36.4).body, '36.4°C (97.5°F). Fever range.');
+  assert.equal(temperatureAlertCopy(38).title, 'Body temperature is high');
+  assert.equal(temperatureAlertCopy(38).body, '38.0°C (100.4°F). Fever range.');
 
   const mild = nextTemperatureNotice(34.1, null, now);
   assert.equal(mild.notify, true);
@@ -94,11 +94,11 @@ test('an improving stage is remembered without a new alert', () => {
 });
 
 test('switching between fever and hypothermia notifies', () => {
-  const dropped = nextTemperatureNotice(34, notice('fever', 36.8, 10), now);
+  const dropped = nextTemperatureNotice(34, notice('fever', 38.4, 10), now);
   assert.equal(dropped.notify, true);
   assert.equal(dropped.next?.stage, 'mild');
 
-  const rose = nextTemperatureNotice(36.6, notice('severe', 27, 10), now);
+  const rose = nextTemperatureNotice(38.2, notice('severe', 27, 10), now);
   assert.equal(rose.notify, true);
   assert.equal(rose.next?.stage, 'fever');
 });

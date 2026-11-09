@@ -18,7 +18,7 @@ Notes
 - The app will hold pending uploads of data until connections is re-established.
 - Sleep is saved on the phone when a wake downloads it. The ring can be on the table. Heart rate and steps already saved stay put.
 - The ring's own heart-rate check is off until an app writes it. BLEScraper turns it on every 5 minutes, and turns on blood oxygen, stress, and HRV with it. Those three follow the heart-rate cycle. SpO2 and temperature are stored in half-hour slots. A shorter heart-rate interval than 5 minutes does not make a finer stored record.
-- The body-temperature card and a phone notification use the same lines. Fever is 36.4°C (97.5°F) or higher. Below 35°C (95°F) is mild hypothermia, below 32°C (89.6°F) is moderate, and below 28°C (82.4°F) is severe. 35.0°C through 36.3°C stays normal. The rules are under Body temperature.
+- The body-temperature card and a phone notification use the same lines. Fever is 38°C (100.4°F) or higher. Below 35°C (95°F) is mild hypothermia, below 32°C (89.6°F) is moderate, and below 28°C (82.4°F) is severe. 35.0°C through 37.9°C stays normal. The rules are under Body temperature.
 - Those switches are on the Settings screen. On the home screen, open the Arduino card and tap Settings. Apply to ring writes them immediately. The next download writes them again if the ring's answer does not match. An older ring that ignores HRV keeps the other three.
 - While the app is open, nothing cycles the sensor. The only automatic phone cycle is the download of data the ring already stored, about every 4 hours, or once when the app is opened and a download is already due. The Measure buttons run only when tapped. A download holds the radio for a short read, then disconnects, and the ring continues. iOS will not wake the app after it is swiped away.
 - The sleep score is estimated on the phone from the stages. The ring does not send one, and the score is not in the upload.
@@ -94,7 +94,7 @@ Body temperature
 
 The card shows the latest finger reading in °C, with Fahrenheit and the stage beside it. The thermometer runs from 24°C to 40°C.
 
-36.4°C (97.5°F) or higher is Fever. 35.0°C up to 36.4°C is Normal. Below 35°C (95°F) is Mild hypothermia, and that band runs down to 32°C. Below 32°C (89.6°F) is Moderate hypothermia. Below 28°C (82.4°F) is Severe hypothermia. Readings under 28°C used to be discarded. They are kept now so a severe reading can alert. A value still warming up, or anything under 20°C or over 43°C, is still ignored.
+38°C (100.4°F) or higher is Fever. 35.0°C up to 38°C is Normal. Below 35°C (95°F) is Mild hypothermia, and that band runs down to 32°C. Below 32°C (89.6°F) is Moderate hypothermia. Below 28°C (82.4°F) is Severe hypothermia. Readings under 28°C used to be discarded. They are kept now so a severe reading can alert. A value still warming up, or anything under 20°C or over 43°C, is still ignored.
 
 A Measure tap or a background sync notifies from that latest reading. The first time it crosses a line, the phone notifies. A worse line notifies again right away. The same stage waits 4 hours, then reminds. A normal reading clears the notice. Opening the app uses the saved reading the same way. A sync that does not include a temperature leaves the last notice alone.
 

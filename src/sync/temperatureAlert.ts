@@ -1,4 +1,4 @@
-export const FEVER_C = 36.4;
+export const FEVER_C = 38;
 export const MILD_HYPOTHERMIA_C = 35;
 export const MODERATE_HYPOTHERMIA_C = 32;
 export const SEVERE_HYPOTHERMIA_C = 28;
@@ -15,7 +15,7 @@ export type TemperatureNotice = {
   notifiedAt: string;
 };
 
-// Finger reading. Fever starts at 36.4°C (97.5°F). Cold alerts start below
+// Finger reading. Fever starts at 38°C (100.4°F). Cold alerts start below
 // 35°C (95°F), then 32°C (89.6°F), then 28°C (82.4°F).
 export function temperatureStage(celsius: number): TemperatureStage {
   if (celsius >= FEVER_C) return 'fever';
