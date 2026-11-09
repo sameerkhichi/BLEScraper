@@ -1,7 +1,6 @@
 import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 
 import type { BatteryReading, HeartRateSample, MetricSample, RingChecks, SleepNight, StepSample, VitalSpot } from '../model';
-import { loadSettings } from '../sync/storage';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
 import { getBleManager } from './manager';
@@ -516,6 +515,9 @@ export class RingClient {
     await this.run(async () => {
       if (!armed) {
         await this.send(gesturePacket(GESTURE_DISABLE));
+        await this.send(rawSensorPacket(RAW_SENSOR_DISABLE));
+        // The ring applies this after the write returns. Disconnecting immediately leaves the old mode on.
+        await delay(400);
         debugLog('Disarmed the ring wave detector');
         return;
       }
@@ -841,6 +843,9 @@ export class RingClient {
       debugLog(`Ring ${this.device.id} rejected command ${command & 0x7f}`);
       return;
     }
+    if (command === 29 || command === 28) {
+      debugLog(`Ring music packet ${command} byte ${packet[1] ?? 0}`);
+    }
     this.listeners.get(command)?.(packet.subarray(0, 16));
   }
 
@@ -932,7 +937,6 @@ export async function openRing(ringId: string): Promise<RingClient> {
   try {
     const client = await RingClient.connect(ringId);
     openSession = { ringId, client };
-    await applyWaveDetector(client);
     return client;
   } catch (error) {
     if (!shouldRetryConnect(error)) throw error;
@@ -946,18 +950,7 @@ export async function openRing(ringId: string): Promise<RingClient> {
     await delay(1500);
     const client = await RingClient.connect(ringId);
     openSession = { ringId, client };
-    await applyWaveDetector(client);
     return client;
-  }
-}
-
-async function applyWaveDetector(client: RingClient): Promise<void> {
-  try {
-    const settings = await loadSettings();
-    await client.setWaveDetector(settings.factoryGestures);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'could not set the wave detector';
-    debugLog(`Wave detector was not updated: ${message}`);
   }
 }
 
@@ -966,6 +959,12 @@ export async function closeRing(ringId?: string): Promise<boolean> {
   if (!current) return false;
   if (ringId && current.ringId !== ringId) return false;
   openSession = null;
+  try {
+    await current.client.setWaveDetector(false);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'could not disarm the ring';
+    debugLog(`Wave detector was still armed at disconnect: ${message}`);
+  }
   await current.client.disconnect();
   return true;
 }

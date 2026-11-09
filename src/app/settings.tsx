@@ -58,7 +58,11 @@ export default function SettingsScreen() {
           const client = await openRing(settings.ringId as string);
           await client.setWaveDetector(value);
         });
-        setGestureNote(value ? 'The ring wave detector is armed.' : 'The ring wave detector is disarmed.');
+        setGestureNote(
+          value
+            ? 'Armed until this connection ends. The app turns it off again on disconnect.'
+            : 'Factory gesture control is off. It is written again when the app disconnects.',
+        );
       } catch (error) {
         setGestureNote(error instanceof Error ? error.message : 'The ring did not update. The choice is saved for the next connection.');
       }
@@ -127,7 +131,7 @@ export default function SettingsScreen() {
           value={factoryGestures}
         />
         <Text style={styles.body}>
-          Leave this off. The poses on the Accelerometer screen are recognized on the phone from the accelerometer, so they keep working. This switch only arms the wave the ring shipped with, which can skip a song when your hand moves. Each connection writes this choice to the ring. If a song still skips with this off, forget the ring in the phone's Bluetooth list and choose it again here.
+          Leave this off. Turning it on is the ring's own gesture control, and that is what skips a song when the ring moves. The app turns it off again every time it disconnects, including after a sync. Poses on the Accelerometer screen are recognized on the phone and do not use it. If a song still skips with this off, after the app has disconnected, the phone has the ring saved as a media remote. Forget the ring in the phone's Bluetooth settings. Do not pair it from that list. Connect to it from this app.
         </Text>
         {gestureNote ? <Text style={styles.body}>{gestureNote}</Text> : null}
         <Text style={styles.label}>Ring checks</Text>
