@@ -31,7 +31,6 @@ import {
   batteryPacket,
   bodyTemperatureCelsius,
   classifyWear,
-  continueHeartRatePacket,
   isPlausibleSpo2,
   parseBattery,
   parseLiveHeartRate,
@@ -362,11 +361,17 @@ export class RingClient {
 
   async watchHeartRate(onFrame: (frame: HeartRateFrame) => void): Promise<void> {
     return this.run(async () => {
-      let poll: ReturnType<typeof setInterval> | null = null;
+      let restart: ReturnType<typeof setTimeout> | null = null;
+      const clearRestart = () => {
+        if (!restart) return;
+        clearTimeout(restart);
+        restart = null;
+      };
       try {
         await new Promise<void>((resolve, reject) => {
           let settled = false;
           let offTimer: ReturnType<typeof setTimeout> | null = null;
+          let sawBpm = false;
           const clearOff = () => {
             if (!offTimer) return;
             clearTimeout(offTimer);
@@ -375,7 +380,7 @@ export class RingClient {
           const finish = () => {
             if (settled) return;
             settled = true;
-            if (poll) clearInterval(poll);
+            clearRestart();
             clearOff();
             this.heartStop = null;
             this.listeners.delete(CMD_START_REAL_TIME);
@@ -385,45 +390,50 @@ export class RingClient {
           const abort = (error: Error) => {
             if (settled) return;
             settled = true;
-            if (poll) clearInterval(poll);
+            clearRestart();
             clearOff();
             this.heartStop = null;
             this.listeners.delete(CMD_START_REAL_TIME);
             this.aborts.delete(abort);
             reject(error);
           };
+          // Another start while the light is still measuring wipes the beat. Wait until the packets stop.
+          const askAgain = () => {
+            clearRestart();
+            if (settled) return;
+            restart = setTimeout(() => {
+              restart = null;
+              if (settled) return;
+              debugLog('Asking for the next heart-rate sample');
+              this.send(startHeartRatePacket()).catch(() => undefined);
+            }, 2500);
+          };
           this.aborts.add(abort);
           this.heartStop = finish;
-          let lastSampleAt = 0;
-          let sawBpm = false;
           this.listeners.set(CMD_START_REAL_TIME, (packet) => {
             const bpm = parseLiveHeartRate(packet);
             if (bpm !== null) {
               clearOff();
-              lastSampleAt = Date.now();
               sawBpm = true;
               debugLog(`Heart rate ${bpm}`);
               onFrame({ kind: 'bpm', bpm });
+              askAgain();
               return;
             }
+            debugLog(`Heart-rate packet ${toHex(packet)}`);
             if (classifyWear(packet) !== 'off') {
               clearOff();
               return;
             }
-            // A status packet between pulses is normal once the trace has started.
-            const quietMs = sawBpm ? 8000 : 3000;
+            const quietMs = sawBpm ? 8000 : 15000;
             if (!offTimer) offTimer = setTimeout(() => abort(new Error(NOT_WORN_MESSAGE)), quietMs);
           });
-          this.send(startHeartRatePacket()).catch(abort);
-          // Continue only after the stream goes quiet. Another start resets the sensor and repeats the first number.
-          poll = setInterval(() => {
-            if (settled) return;
-            if (lastSampleAt !== 0 && Date.now() - lastSampleAt < 2000) return;
-            this.send(continueHeartRatePacket()).catch(() => undefined);
-          }, 2000);
+          const start = startHeartRatePacket();
+          debugLog(`Heart-rate start ${toHex(start)}`);
+          this.send(start).catch(abort);
         });
       } finally {
-        if (poll) clearInterval(poll);
+        clearRestart();
         try {
           await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
         } catch {

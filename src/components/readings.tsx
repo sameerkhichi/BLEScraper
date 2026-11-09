@@ -130,7 +130,7 @@ export function HeartRateChart({
         </View>
       </View>
       {points.length === 0 ? (
-        <Text style={styles.meta}>{live ? 'Waiting for the next beat.' : 'Measure to draw your heart rate.'}</Text>
+        <Text style={styles.meta}>{live ? 'Measuring. The first beat takes a few seconds.' : 'Measure to draw your heart rate.'}</Text>
       ) : (
         <BpmLine points={points} />
       )}
