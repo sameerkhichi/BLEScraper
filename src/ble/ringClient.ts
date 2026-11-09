@@ -150,8 +150,9 @@ export class RingClient {
     let setupFailed: Error | null = null;
     try {
       device = await manager.connectToDevice(deviceId, { timeout: 20000 });
-      // The iOS build discovers only the UART and sleep services. Opening every
-      // service includes HID, and iOS then asks to pair the ring into Bluetooth Settings.
+      // The iOS build discovers the UART and sleep services and the four data
+      // characteristics only. It does not read or write an encrypted attribute,
+      // so CoreBluetooth does not start a bond.
       debugLog('Discovering the data services');
       await device.discoverAllServicesAndCharacteristics();
 
