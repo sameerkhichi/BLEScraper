@@ -318,7 +318,7 @@ export default function HomeScreen() {
             {queue.length === 0 ? 'Nothing waiting to send.' : `${queue.length} reading${queue.length === 1 ? '' : 's'} waiting.`}
           </Text>
           <Button label="View waiting readings" onPress={() => router.push('/queue')} tone="secondary" />
-          <Button label="Settings" onPress={() => router.push('/settings')} tone="secondary" />
+          <Button label="API settings" onPress={() => router.push('/settings')} tone="secondary" />
         </Card>
 
         <Button disabled={busy} label="Sync ring" onPress={syncRing} />
@@ -332,7 +332,7 @@ export default function HomeScreen() {
                   Leave BLEScraper in the app switcher. The screen can be off, and another app can be in front.
                 </Text>
                 <Text style={styles.body}>
-                  The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper does not take those readings on its own. Turn them on or off under Settings, in the Arduino card. Apply to ring writes them now.
+                  The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper does not take those readings on its own. Turn them on or off in Settings at the top right. Apply to ring writes them now.
                 </Text>
                 <Text style={styles.body}>
                   About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.
@@ -348,7 +348,7 @@ export default function HomeScreen() {
               </>
             ) : (
               <Text style={styles.body}>
-                Automatic download is off. Turn it on under Settings, in the Arduino card. With it on, leave BLEScraper in the app switcher. The phone wakes about every {CATCHUP_HOURS} hours to download what the ring has stored.
+                Automatic download is off. Turn it on in Settings at the top right. With it on, leave BLEScraper in the app switcher. The phone wakes about every {CATCHUP_HOURS} hours to download what the ring has stored.
               </Text>
             )}
           </View>
