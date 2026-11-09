@@ -1,6 +1,7 @@
 import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 
 import type { BatteryReading, HeartRateSample, MetricSample, RingChecks, SleepNight, StepSample, VitalSpot } from '../model';
+import { loadSettings } from '../sync/storage';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
 import { getBleManager } from './manager';
@@ -411,10 +412,7 @@ export class RingClient {
           this.listeners.set(CMD_GESTURE, (packet) => {
             if (packet[1] === GESTURE_WAVE) onFrame({ kind: 'wave' });
           });
-          this.send(rawSensorPacket(RAW_SENSOR_ENABLE))
-            .then(() => this.send(gesturePacket(GESTURE_ENABLE)).catch(() => undefined))
-            .then(() => this.send(gesturePacket(GESTURE_ARM)).catch(() => undefined))
-            .catch(abort);
+          this.send(rawSensorPacket(RAW_SENSOR_ENABLE)).catch(abort);
         });
       } finally {
         await this.stopRawSensors();
@@ -514,12 +512,20 @@ export class RingClient {
     this.heartStop?.();
   }
 
+  async setWaveDetector(armed: boolean): Promise<void> {
+    await this.run(async () => {
+      if (!armed) {
+        await this.send(gesturePacket(GESTURE_DISABLE));
+        debugLog('Disarmed the ring wave detector');
+        return;
+      }
+      await this.send(gesturePacket(GESTURE_ENABLE));
+      await this.send(gesturePacket(GESTURE_ARM));
+      debugLog('Armed the ring wave detector');
+    });
+  }
+
   private async stopRawSensors(): Promise<void> {
-    try {
-      await this.send(gesturePacket(GESTURE_DISABLE));
-    } catch {
-      // The wave detector may already be off.
-    }
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await this.send(rawSensorPacket(RAW_SENSOR_DISABLE));
@@ -926,6 +932,7 @@ export async function openRing(ringId: string): Promise<RingClient> {
   try {
     const client = await RingClient.connect(ringId);
     openSession = { ringId, client };
+    await applyWaveDetector(client);
     return client;
   } catch (error) {
     if (!shouldRetryConnect(error)) throw error;
@@ -939,7 +946,18 @@ export async function openRing(ringId: string): Promise<RingClient> {
     await delay(1500);
     const client = await RingClient.connect(ringId);
     openSession = { ringId, client };
+    await applyWaveDetector(client);
     return client;
+  }
+}
+
+async function applyWaveDetector(client: RingClient): Promise<void> {
+  try {
+    const settings = await loadSettings();
+    await client.setWaveDetector(settings.factoryGestures);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'could not set the wave detector';
+    debugLog(`Wave detector was not updated: ${message}`);
   }
 }
 

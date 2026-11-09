@@ -31,6 +31,7 @@ export async function loadSettings(): Promise<AppSettings> {
     ringId: typeof parsed.ringId === 'string' ? parsed.ringId : null,
     ringName: typeof parsed.ringName === 'string' ? parsed.ringName : null,
     autoSync: typeof parsed.autoSync === 'boolean' ? parsed.autoSync : true,
+    factoryGestures: parsed.factoryGestures === true,
     ringChecks: ringChecksFrom(parsed.ringChecks),
   };
 }

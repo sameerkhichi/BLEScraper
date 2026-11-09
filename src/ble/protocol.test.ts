@@ -24,7 +24,12 @@ import {
   continueHeartRatePacket,
   smoothHeartRate,
   parseRealtime,
+  CMD_GESTURE,
+  GESTURE_ARM,
+  GESTURE_DISABLE,
+  GESTURE_ENABLE,
   RAW_SENSOR_DISABLE,
+  gesturePacket,
   rawSensorPacket,
   REALTIME_TEMPERATURE,
   setTimePacket,
@@ -224,6 +229,14 @@ test('raw accelerometer packet decodes 12-bit axes in g', () => {
   assert.deepEqual(ppg, { kind: 'ppg', value: 12894, max: 12918, min: 12574, diff: 344 });
   assert.equal(rawSensorPacket(0x04)[1], 0x04);
   assert.equal(rawSensorPacket(RAW_SENSOR_DISABLE)[1], 0x05);
+});
+
+test('wave detector packets arm and disarm the ring without touching phone poses', () => {
+  assert.equal(gesturePacket(GESTURE_ENABLE)[0], CMD_GESTURE);
+  assert.equal(gesturePacket(GESTURE_ENABLE)[1], GESTURE_ENABLE);
+  assert.equal(gesturePacket(GESTURE_ARM)[1], GESTURE_ARM);
+  assert.equal(gesturePacket(GESTURE_DISABLE)[1], GESTURE_DISABLE);
+  assert.equal(isValidPacket(gesturePacket(GESTURE_DISABLE)), true);
 });
 
 test('tilt follows the finger and stays put when the ring is turned over', () => {

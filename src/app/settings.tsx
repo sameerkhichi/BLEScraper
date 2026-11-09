@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
+import { openRing } from '../ble/ringClient';
 import { Button, colors } from '../components/ui';
 import { RING_HEART_RATE_MINUTES, type RingChecks } from '../model';
 import { LOW_BATTERY_PERCENT, LOW_BATTERY_REMIND_HOURS } from '../sync/batteryAlert';
@@ -9,19 +10,22 @@ import { CATCHUP_HOURS } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 export default function SettingsScreen() {
-  const { busy, settings, saveAppSettings, applyRingChecks } = useAppState();
+  const { busy, settings, saveAppSettings, applyRingChecks, withRing } = useAppState();
   const [apiUrl, setApiUrl] = useState(settings.apiUrl);
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [autoSync, setAutoSync] = useState(settings.autoSync);
+  const [factoryGestures, setFactoryGestures] = useState(settings.factoryGestures);
   const [checks, setChecks] = useState<RingChecks>(settings.ringChecks);
   const [checkNote, setCheckNote] = useState('');
+  const [gestureNote, setGestureNote] = useState('');
 
   useEffect(() => {
     setApiUrl(settings.apiUrl);
     setApiKey(settings.apiKey);
     setAutoSync(settings.autoSync);
+    setFactoryGestures(settings.factoryGestures);
     setChecks(settings.ringChecks);
-  }, [settings.apiUrl, settings.apiKey, settings.autoSync, settings.ringChecks]);
+  }, [settings.apiUrl, settings.apiKey, settings.autoSync, settings.factoryGestures, settings.ringChecks]);
 
   const save = async () => {
     await saveAppSettings({
@@ -29,6 +33,7 @@ export default function SettingsScreen() {
       apiUrl: apiUrl.trim(),
       apiKey: apiKey.trim(),
       autoSync,
+      factoryGestures,
       ringChecks: { ...checks, heartRateMinutes: RING_HEART_RATE_MINUTES },
     });
     router.back();
@@ -36,7 +41,28 @@ export default function SettingsScreen() {
 
   const toggleAutoSync = (value: boolean) => {
     setAutoSync(value);
-    void saveAppSettings({ ...settings, autoSync: value });
+    void saveAppSettings({ ...settings, autoSync: value, factoryGestures });
+  };
+
+  const toggleFactoryGestures = (value: boolean) => {
+    setFactoryGestures(value);
+    setGestureNote('');
+    void (async () => {
+      await saveAppSettings({ ...settings, autoSync, factoryGestures: value, ringChecks: checks });
+      if (!settings.ringId) {
+        setGestureNote('Saved. It is written the next time the ring connects.');
+        return;
+      }
+      try {
+        await withRing(async () => {
+          const client = await openRing(settings.ringId as string);
+          await client.setWaveDetector(value);
+        });
+        setGestureNote(value ? 'The ring wave detector is armed.' : 'The ring wave detector is disarmed.');
+      } catch (error) {
+        setGestureNote(error instanceof Error ? error.message : 'The ring did not update. The choice is saved for the next connection.');
+      }
+    })();
   };
 
   const updateCheck = (key: 'heartRate' | 'spo2' | 'stress' | 'hrv', value: boolean) => {
@@ -46,6 +72,8 @@ export default function SettingsScreen() {
       ...settings,
       apiUrl: apiUrl.trim(),
       apiKey: apiKey.trim(),
+      autoSync,
+      factoryGestures,
       ringChecks: next,
     });
   };
@@ -57,6 +85,7 @@ export default function SettingsScreen() {
       apiUrl: apiUrl.trim(),
       apiKey: apiKey.trim(),
       autoSync,
+      factoryGestures,
       ringChecks: next,
     });
     try {
@@ -91,6 +120,16 @@ export default function SettingsScreen() {
         <Text style={styles.body}>
           The phone notifies you when the ring battery is below {LOW_BATTERY_PERCENT}%. It notifies again if the level drops, and every {LOW_BATTERY_REMIND_HOURS} hours while it stays that low.
         </Text>
+        <Text style={styles.label}>Ring wave detector</Text>
+        <CheckRow
+          label="Factory gesture control"
+          onValueChange={toggleFactoryGestures}
+          value={factoryGestures}
+        />
+        <Text style={styles.body}>
+          Leave this off. The poses on the Accelerometer screen are recognized on the phone from the accelerometer, so they keep working. This switch only arms the wave the ring shipped with, which can skip a song when your hand moves. Each connection writes this choice to the ring. If a song still skips with this off, forget the ring in the phone's Bluetooth list and choose it again here.
+        </Text>
+        {gestureNote ? <Text style={styles.body}>{gestureNote}</Text> : null}
         <Text style={styles.label}>Ring checks</Text>
         <Text style={styles.body}>
           These run on the ring after the phone disconnects. Heart rate is every {RING_HEART_RATE_MINUTES} minutes. The other three follow that cycle. Apply writes them now. The next download writes them again if the ring disagrees.

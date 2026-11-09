@@ -115,7 +115,8 @@ export default function MotionScreen() {
       <Text style={styles.body}>
         The circle is the ring, fingertip at the top. The dot rolls toward whichever side you lower. Wave the hand,
         curl the finger in twice for come here, hold the right or left side up for a thumb, or trace a V with the
-        fingertip for peace. The pose chips stay too. The red and green lights turn off when you stop.
+        fingertip for peace. Those poses are recognized on the phone. The ring's own wave stays as set in Settings.
+        The pose chips stay too. The red and green lights turn off when you stop.
       </Text>
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <Card>

@@ -22,6 +22,8 @@ export type AppSettings = {
   ringId: string | null;
   ringName: string | null;
   autoSync: boolean;
+  // The ring's own wave detector. Phone-side poses do not use it.
+  factoryGestures: boolean;
   ringChecks: RingChecks;
 };
 
@@ -426,5 +428,6 @@ export const defaultSettings: AppSettings = {
   ringId: null,
   ringName: null,
   autoSync: true,
+  factoryGestures: false,
   ringChecks: defaultRingChecks,
 };
