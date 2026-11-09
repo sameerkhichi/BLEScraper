@@ -9,7 +9,7 @@ import { autoSyncPaused, runWithQueue, runWithRing } from './ringGate';
 import {
   evaluateSchedule,
   evaluateUpload,
-  HISTORY_INTERVAL_MS,
+  DOWNLOAD_INTERVAL_MS,
   readingChanged,
   RETRY_INTERVAL_MS,
   shouldSync,
@@ -26,7 +26,7 @@ import {
   saveLastPayload,
   saveQueue,
 } from './storage';
-import { applyWornSpots, collectRing, measureWornSpots } from './syncRing';
+import { collectRing } from './syncRing';
 import { postPayload } from './upload';
 
 const PAUSED_WAIT_MS = 30 * 1000;
@@ -79,11 +79,11 @@ export async function markUploadAttempted(): Promise<void> {
 }
 
 export async function runCatchUp(): Promise<AutoSyncResult> {
-  if (Platform.OS === 'web') return idle(HISTORY_INTERVAL_MS);
+  if (Platform.OS === 'web') return idle(DOWNLOAD_INTERVAL_MS);
   if (autoSyncPaused()) return idle(PAUSED_WAIT_MS);
 
   const settings = await loadSettings();
-  if (!settings.autoSync || !settings.ringId) return idle(HISTORY_INTERVAL_MS);
+  if (!settings.autoSync || !settings.ringId) return idle(DOWNLOAD_INTERVAL_MS);
 
   return runWithRing(async () => {
     const current = await loadSettings();
@@ -107,15 +107,9 @@ export async function runCatchUp(): Promise<AutoSyncResult> {
         current.ringName,
         { logs: true, vitals: false, sleep: true },
         report,
-        { probeWear: false, historyDays: STORED_DAYS },
+        { probeWear: false, historyDays: STORED_DAYS, checks: current.ringChecks },
       );
-      let downloaded = collected.payload;
-      try {
-        downloaded = applyWornSpots(collected.payload, await measureWornSpots(client, report));
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Blood oxygen and temperature were not read.';
-        debugLog(message);
-      }
+      const downloaded = collected.payload;
       await closeRing();
       if (radioHeld) {
         radioHeld = false;
@@ -139,16 +133,16 @@ export async function runCatchUp(): Promise<AutoSyncResult> {
         const flushed = await flushQueueNow(current);
         if (flushed) return flushed;
         if (!current.apiUrl.trim()) {
-          return { outcome: 'saved' as const, waitMs: HISTORY_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' };
+          return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' };
         }
-        return { outcome: 'saved' as const, waitMs: HISTORY_INTERVAL_MS, message: 'Downloaded the ring record.' };
+        return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Downloaded the ring record.' };
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Sync failed.';
       debugLog(message);
       const failed: AutoSyncState = { ...(await loadAutoSyncState()), failedAt: new Date().toISOString() };
       await saveAutoSyncState(failed);
-      return { outcome: 'failed', waitMs: HISTORY_INTERVAL_MS, message };
+      return { outcome: 'failed', waitMs: evaluateSchedule(failed, Date.now()).waitMs, message };
     } finally {
       await closeRing();
       if (radioHeld) await releaseAndroidRadio();
@@ -157,11 +151,11 @@ export async function runCatchUp(): Promise<AutoSyncResult> {
 }
 
 export async function runAutoSync(options: { allowAndroidService: boolean }): Promise<AutoSyncResult> {
-  if (Platform.OS === 'web') return idle(HISTORY_INTERVAL_MS);
+  if (Platform.OS === 'web') return idle(DOWNLOAD_INTERVAL_MS);
   if (autoSyncPaused()) return idle(PAUSED_WAIT_MS);
 
   const settings = await loadSettings();
-  if (!settings.autoSync || !settings.ringId) return idle(HISTORY_INTERVAL_MS);
+  if (!settings.autoSync || !settings.ringId) return idle(DOWNLOAD_INTERVAL_MS);
 
   const state = await loadAutoSyncState();
   const now = Date.now();
@@ -206,7 +200,10 @@ export async function runAutoSync(options: { allowAndroidService: boolean }): Pr
 
       report('Connecting to the ring');
       const client = await openRing(ringId);
-      const collected = await collectRing(client, ringId, current.ringName, plan.plan, report);
+      const collected = await collectRing(client, ringId, current.ringName, plan.plan, report, {
+        probeWear: false,
+        checks: current.ringChecks,
+      });
       if (!collected.worn) {
         await closeRing();
         if (radioHeld) {
@@ -388,7 +385,7 @@ async function flushQueueNow(settings: AppSettings): Promise<AutoSyncResult | nu
   if (flushed.error) {
     return {
       outcome: 'saved',
-      waitMs: HISTORY_INTERVAL_MS,
+      waitMs: DOWNLOAD_INTERVAL_MS,
       message:
         flushed.sent > 0
           ? `Sent ${flushed.sent}. ${flushed.remaining.length} still waiting. ${flushed.error}`
@@ -397,7 +394,7 @@ async function flushQueueNow(settings: AppSettings): Promise<AutoSyncResult | nu
   }
   return {
     outcome: 'synced',
-    waitMs: HISTORY_INTERVAL_MS,
+    waitMs: DOWNLOAD_INTERVAL_MS,
     message: flushed.sent > 0 ? 'Synced and sent.' : 'Nothing waiting to send.',
   };
 }

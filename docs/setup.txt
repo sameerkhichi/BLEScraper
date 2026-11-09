@@ -6,7 +6,7 @@ This app runs on an iPhone. It reads the Colmi R09 over unencrypted BLE GATT, ke
 The iOS binary is built in the cloud with EAS, uploaded to App Store Connect, and attached to the TestFlight group named Internal. GitHub Actions does that on every push to main that changes code, and again on the 1st of every other month so the TestFlight build is refreshed before the 90-day expiry. GitHub's scheduler has no "every 60 days" interval, so every other month is the schedule.
 
 FOR API/IP FORWARDING USAGE.
-The Arduino URL, entered in the app under API settings. 
+The Arduino URL, entered in the app under Settings. 
 Example: http://203.0.113.10:8080/ingest
    The phone allows plain HTTP because the home server is not required to have a certificate.
    Optional API key is sent as the X-Api-Key header.
@@ -88,11 +88,13 @@ The ring clock is set to UTC on each sync. Heart-rate history is 5-minute sample
 Automatic sync
 --------------
 
-With a ring selected, the phone wakes about every 8 hours even when the screen is locked and the app is not on screen. It connects, downloads the heart-rate, step, and sleep record stored on the ring, sends it, and disconnects. If the ring is being worn, that wake also takes one blood-oxygen reading and one body-temperature reading, and the sensor lights come on. If it is not being worn, those two are skipped. The ring does not store them, so the hours since the last wake are not filled in. One wake reads about a week of the stored record, so a missed wake does not drop a day of heart rate, steps, or sleep.
+The ring's own heart-rate check is off until an app writes it. On the home screen, the Arduino card has Settings. Heart rate every 5 minutes, blood oxygen, stress, and HRV are switches there. Apply to ring writes them now. The next download writes them again if the ring disagrees. Blood oxygen, stress, and HRV follow the heart-rate cycle. SpO2 and temperature come back as half-hour slots.
+
+With a ring selected, the phone wakes about every 4 hours even when the screen is locked and the app is not on screen. It connects, downloads the stored heart rate, steps, sleep, blood oxygen, temperature, stress, and HRV, sends them, and disconnects. It does not start a live sensor reading on that wake. The ring can be on the table. One wake reads about a week of the stored record, so a missed wake does not drop a day.
 
 iOS chooses the actual time. It needs some battery and a network, and it will not wake the app after you swipe it away in the app switcher. Opening the app again arms the next wake. Android shows a notification only while a download is running.
 
-While the app is open, steps and stored heart rate are also read every 15 minutes. Live heart rate, blood oxygen, and temperature are read every 30 minutes because those turn the ring lights on, and only when the ring is being worn. Sleep is included about every 6 hours during an open session. Turn the wakes off under API settings, Keep syncing.
+Leaving the app open does not start a repeating heart-rate, blood-oxygen, or temperature check. Opening the app runs a download when one is due. The Measure buttons run only when tapped. Turn the wakes off under Settings, Keep syncing.
 
 This needs a new development or TestFlight build. Background Bluetooth and the scheduler are native, so Expo Go cannot run them.
 

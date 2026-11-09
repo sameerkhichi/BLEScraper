@@ -1,9 +1,28 @@
+export const RING_HEART_RATE_MINUTES = 5;
+
+export type RingChecks = {
+  heartRate: boolean;
+  heartRateMinutes: number;
+  spo2: boolean;
+  stress: boolean;
+  hrv: boolean;
+};
+
+export const defaultRingChecks: RingChecks = {
+  heartRate: true,
+  heartRateMinutes: RING_HEART_RATE_MINUTES,
+  spo2: true,
+  stress: true,
+  hrv: true,
+};
+
 export type AppSettings = {
   apiUrl: string;
   apiKey: string;
   ringId: string | null;
   ringName: string | null;
   autoSync: boolean;
+  ringChecks: RingChecks;
 };
 
 export type BatteryReading = {
@@ -14,6 +33,11 @@ export type BatteryReading = {
 export type HeartRateSample = {
   timestamp: string;
   bpm: number;
+};
+
+export type MetricSample = {
+  timestamp: string;
+  value: number;
 };
 
 export type VitalSpot = {
@@ -252,6 +276,8 @@ export type UploadPayload = {
   accelerometer: AccelSample | null;
   heartRate: HeartRateSample[];
   steps: StepSample[];
+  stress: MetricSample[];
+  hrv: MetricSample[];
   sleep: SleepNight[];
   warnings: string[];
 };
@@ -289,6 +315,29 @@ export function vitalSpot(
   return { timestamp, spo2, bodyTemperatureC };
 }
 
+export function isMetricSample(value: unknown): value is MetricSample {
+  if (!value || typeof value !== 'object') return false;
+  const sample = value as MetricSample;
+  return typeof sample.timestamp === 'string' && Number.isFinite(Date.parse(sample.timestamp)) && typeof sample.value === 'number';
+}
+
+export function mergeVitalSpots(spots: VitalSpot[]): VitalSpot[] {
+  const byTime = new Map<string, VitalSpot>();
+  for (const spot of spots) {
+    const existing = byTime.get(spot.timestamp);
+    if (!existing) {
+      byTime.set(spot.timestamp, spot);
+      continue;
+    }
+    byTime.set(spot.timestamp, {
+      timestamp: spot.timestamp,
+      spo2: spot.spo2 ?? existing.spo2,
+      bodyTemperatureC: spot.bodyTemperatureC ?? existing.bodyTemperatureC,
+    });
+  }
+  return [...byTime.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+}
+
 export function isVitalSpot(value: unknown): value is VitalSpot {
   if (!value || typeof value !== 'object') return false;
   const spot = value as VitalSpot;
@@ -308,15 +357,14 @@ export function keepStoredSamples(
   next: UploadPayload,
   now = Date.now(),
 ): UploadPayload {
-  const vitalSpots = pruneVitalSpots(
-    previous ? unionByTimestamp(previous.vitalSpots ?? [], next.vitalSpots ?? []) : (next.vitalSpots ?? []),
-    now,
-  );
-  if (!previous) return { ...next, vitalSpots };
+  const vitalSpots = pruneVitalSpots(mergeVitalSpots([...(previous?.vitalSpots ?? []), ...(next.vitalSpots ?? [])]), now);
+  if (!previous) return { ...next, vitalSpots, stress: next.stress ?? [], hrv: next.hrv ?? [] };
   return {
     ...next,
     heartRate: unionByTimestamp(previous.heartRate, next.heartRate),
     steps: unionByTimestamp(previous.steps, next.steps),
+    stress: unionByTimestamp(previous.stress ?? [], next.stress ?? []),
+    hrv: unionByTimestamp(previous.hrv ?? [], next.hrv ?? []),
     vitalSpots,
   };
 }
@@ -362,10 +410,12 @@ export function mergeReadings(
         : previous.realtimeHeartRateAt ?? null,
     spo2: next.spo2 ?? previous.spo2,
     bodyTemperatureC: next.bodyTemperatureC ?? previous.bodyTemperatureC,
-    vitalSpots: pruneVitalSpots(unionByTimestamp(previous.vitalSpots ?? [], next.vitalSpots ?? []), Date.now()),
+    vitalSpots: pruneVitalSpots(mergeVitalSpots([...(previous.vitalSpots ?? []), ...(next.vitalSpots ?? [])]), Date.now()),
     accelerometer: next.accelerometer ?? previous.accelerometer,
     heartRate: keepHistory ? previous.heartRate : next.heartRate,
     steps: keepHistory ? previous.steps : next.steps,
+    stress: keepHistory ? (previous.stress ?? []) : (next.stress ?? []),
+    hrv: keepHistory ? (previous.hrv ?? []) : (next.hrv ?? []),
     sleep: keepHistory ? previous.sleep : next.sleep,
   };
 }
@@ -376,4 +426,5 @@ export const defaultSettings: AppSettings = {
   ringId: null,
   ringName: null,
   autoSync: true,
+  ringChecks: defaultRingChecks,
 };

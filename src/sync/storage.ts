@@ -1,6 +1,17 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { defaultSettings, isAccelSample, isSleepNight, isVitalSpot, type AppSettings, type UploadPayload } from '../model';
+import {
+  defaultRingChecks,
+  defaultSettings,
+  isAccelSample,
+  isMetricSample,
+  isSleepNight,
+  isVitalSpot,
+  RING_HEART_RATE_MINUTES,
+  type AppSettings,
+  type RingChecks,
+  type UploadPayload,
+} from '../model';
 import type { PendingUpload } from './queue';
 import { reportBattery } from './notifyBattery';
 import { emptyAutoSyncState, type AutoSyncState } from './schedule';
@@ -20,6 +31,19 @@ export async function loadSettings(): Promise<AppSettings> {
     ringId: typeof parsed.ringId === 'string' ? parsed.ringId : null,
     ringName: typeof parsed.ringName === 'string' ? parsed.ringName : null,
     autoSync: typeof parsed.autoSync === 'boolean' ? parsed.autoSync : true,
+    ringChecks: ringChecksFrom(parsed.ringChecks),
+  };
+}
+
+function ringChecksFrom(value: unknown): RingChecks {
+  if (!value || typeof value !== 'object') return defaultRingChecks;
+  const checks = value as Partial<RingChecks>;
+  return {
+    heartRate: typeof checks.heartRate === 'boolean' ? checks.heartRate : true,
+    heartRateMinutes: RING_HEART_RATE_MINUTES,
+    spo2: typeof checks.spo2 === 'boolean' ? checks.spo2 : true,
+    stress: typeof checks.stress === 'boolean' ? checks.stress : true,
+    hrv: typeof checks.hrv === 'boolean' ? checks.hrv : true,
   };
 }
 
@@ -48,6 +72,8 @@ export async function loadLastPayload(): Promise<UploadPayload | null> {
     bodyTemperatureC: typeof parsed.bodyTemperatureC === 'number' ? parsed.bodyTemperatureC : null,
     vitalSpots: Array.isArray(parsed.vitalSpots) ? parsed.vitalSpots.filter(isVitalSpot) : [],
     accelerometer: isAccelSample(parsed.accelerometer) ? parsed.accelerometer : null,
+    stress: Array.isArray(parsed.stress) ? parsed.stress.filter(isMetricSample) : [],
+    hrv: Array.isArray(parsed.hrv) ? parsed.hrv.filter(isMetricSample) : [],
     sleep: Array.isArray(parsed.sleep) ? parsed.sleep.filter(isSleepNight) : [],
   };
 }

@@ -16,7 +16,10 @@ Notes
 - App will be build using react native and typescript so I can use expo
 - The Bluetooth protocal will be handled through a known react native package to scan for BLE connections. Then a reverse engineered COLMI protocol to decode the raw data coming from the ring. 
 - The app will hold pending uploads of data until connections is re-established.
-- Sleep is saved on the phone when a wake downloads it and while the app is open. The ring can be on the table. Heart rate and steps already saved stay put.
+- Sleep is saved on the phone when a wake downloads it. The ring can be on the table. Heart rate and steps already saved stay put.
+- The ring's own heart-rate check is off until an app writes it. BLEScraper turns it on every 5 minutes, and turns on blood oxygen, stress, and HRV with it. Those three follow the heart-rate cycle. SpO2 and temperature are stored in half-hour slots. A shorter heart-rate interval than 5 minutes does not make a finer stored record.
+- Those switches are on the Settings screen. On the home screen, open the Arduino card and tap Settings. Apply to ring writes them immediately. The next download writes them again if the ring's answer does not match. An older ring that ignores HRV keeps the other three.
+- While the app is open, nothing cycles the sensor. The only automatic phone cycle is the download of data the ring already stored, about every 4 hours, or once when the app is opened and a download is already due. The Measure buttons run only when tapped. A download holds the radio for a short read, then disconnects, and the ring continues. iOS will not wake the app after it is swiped away.
 - The sleep score is estimated on the phone from the stages. The ring does not send one, and the score is not in the upload.
 - The stress score is estimated on the phone from still heart rate against the sleep pulse. The ring does not send one, and the score is not in the upload. The calculation is under Stress score.
 - Will allow for HTTP/JSON communication with an API.
@@ -27,17 +30,17 @@ Notes
 
 Automatic sync
 
-The phone does not have to stay open. About every 8 hours iOS or Android wakes the app, it connects, downloads the stored record, sends it, and disconnects. iOS picks the real time, usually a couple of windows a day, and it will not wake the app after it is swiped away. Opening the app again arms the next wake. Android shows a notification only while that download is running.
+The phone does not have to stay open. About every 4 hours iOS or Android wakes the app, it connects, downloads the stored record, sends it, and disconnects. iOS picks the real time and will not wake the app after it is swiped away. Opening the app again arms the next wake. Android shows a notification only while that download is running.
 
-That wake reads about 7 days of stored heart rate and steps, plus the sleep nights still on the ring. It still runs if the ring is on the table. One successful wake can recover a missed day.
+That wake reads about 7 days of stored heart rate, steps, stress, and HRV, plus the sleep nights and the stored blood-oxygen and temperature slots still on the ring. It still runs if the ring is on the table. One successful wake can recover a missed day. The phone does not start a live heart-rate, oxygen, or temperature session on that wake.
 
-On that same wake the phone checks whether the ring is being worn. The heart-rate sensor comes on for that check. If the ring is being worn, it then takes one blood-oxygen reading and one body-temperature reading, and those lights stay on until each reading finishes. Each pair is saved with the time it was taken, in vitalSpots, and sent with the snapshot. If the ring is not being worn, those two are skipped. The ring does not store oxygen or temperature, so a wake cannot fill in the hours since the previous one. A phone that is powered off cannot take them either, because Bluetooth is off. The phone keeps about 10 days of these spots. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted.
+The ring writes heart rate every 5 minutes once its own check is on. Blood oxygen, stress, and HRV follow that cycle. SpO2 and temperature come back as half-hour slots in vitalSpots. The phone keeps about 10 days of these spots. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted. A phone that is powered off cannot download them, because Bluetooth is off.
 
-While the app is open, steps and stored heart rate are also read every 15 minutes. Live heart rate, SpO2, and body temperature are read every 30 minutes because those turn the lights on, and only when the ring is being worn. Those open-app readings are stored as vital spots too. A manual sync still reads immediately.
+Leaving the app open does not start extra sensor checks. Opening the app runs a download when one is due. The Measure buttons still run only when tapped.
 
 Sleep on the phone
 
-A wake stores the sleep nights still on the ring, whether or not the ring is being worn. While the app is open, sleep is read about every 6 hours. The timer wakes for that read even if heart rate and steps are not due yet. The ring can be nearby but off a finger. That read does not turn the lights on, and it does not replace the heart-rate or step samples already saved. The nights are written into the saved reading, so the Sleep screen and the upload queue both keep them. Sync ring does the same thing if the ring is not on a finger. If the ring does not answer, the next check tries again. A failed sleep read does not wait out the full 6 hours.
+A wake stores the sleep nights still on the ring, whether or not the ring is being worn. Sleep is part of the same download as heart rate and steps, about every 4 hours. The ring can be nearby but off a finger. That read does not turn the lights on, and it does not replace the heart-rate or step samples already saved. The nights are written into the saved reading, so the Sleep screen and the upload queue both keep them. Sync ring does the same thing if the ring is not on a finger. If the ring does not answer, the next check tries again. A failed sleep read does not wait out the full 4 hours.
 
 Sleep score
 
@@ -57,7 +60,7 @@ The score is half the duration part plus half the restorative part, minus the aw
 
 Stress score
 
-The ring does not report stress or the gaps between beats. The Today card estimates a resting-load score from heart rate, steps, and sleep already stored on the phone. That number is not stored as its own field and is not sent in the JSON. Solloid can recompute it from those three logs.
+The Today card estimates a resting-load score from heart rate, steps, and sleep already stored on the phone. That number is not stored as its own field and is not sent in the JSON. Solloid can recompute it from those three logs. The ring's own stress and HRV samples, when the firmware returns them, are separate arrays named stress and hrv.
 
 A heart-rate sample counts for today when three things are true. Its timestamp falls on the phone's local calendar day. It is outside every sleep window, from startedAt up to but not including endedAt. The 15-minute step block that contains it has fewer than 30 steps. A block starts at its timestamp and runs for 15 minutes. A sample with no block does not count. Walking and workouts drop out, so a high pulse from movement is not treated as stress.
 
@@ -73,7 +76,7 @@ Under the circles, a scored day shows the average still BPM, the baseline, and t
 
 Ring storage
 
-The R09 does not keep a month. The useful store is about a week: heart rate in 5-minute slots (288 a day), steps in 15-minute blocks (96 a day), and roughly a week of sleep nights. Days older than that come back empty. Live SpO2 and temperature are not part of that stored week. They exist only for the moment the lights are on, which is why a wake stores one spot instead of a full day. A full week of JSON is a few hundred kilobytes, not a large flash log. There is no published chip size worth planning around.
+The R09 does not keep a month. The useful store is about a week: heart rate in 5-minute slots (288 a day) once automatic checks are on, steps in 15-minute blocks (96 a day), stored blood oxygen and temperature in half-hour slots, and roughly a week of sleep nights. Days older than that come back empty. A full week of JSON is a few hundred kilobytes, not a large flash log. There is no published chip size worth planning around.
 
 Duplicates
 
@@ -87,7 +90,7 @@ The Last reading Steps number is two days because, while the app is open, every 
 
 While the phone is disconnected, the ring keeps its own history. Steps are stored in 15-minute blocks. Heart rate is stored about every 5 minutes. The ring does not send those blocks on its own. They stay on the ring until the phone connects and asks.
 
-On a log sync, about every 15 minutes or when Sync ring is tapped, the phone connects, sets the ring clock to UTC, and requests the stored logs. Steps are yesterday (day offset 1) and today (day offset 0). Heart rate is the log for those same two days. The ring replies with the blocks it has stored. The phone saves that reply as the last reading and disconnects. Days older than yesterday can still sit on the ring. This open-app read does not ask for them.
+On a download, about every 4 hours or when Sync ring is tapped, the phone connects, sets the ring clock to UTC, and requests the stored logs. Steps are yesterday (day offset 1) and today (day offset 0). Heart rate is the log for those same two days. The ring replies with the blocks it has stored. The phone saves that reply as the last reading and disconnects. Days older than yesterday can still sit on the ring. This open-app read does not ask for them.
 
 Last reading Steps adds every step block in that reply, so the number is yesterday plus today. The Today card does not. It keeps the blocks that fall on the phone's local calendar day. A successful upload does not drop yesterday from the next read. The next open-app sync asks for two days again.
 
@@ -118,6 +121,8 @@ The ring sends stages, not a score and not cycle numbers. The score shown in the
   ],
   "accelerometer": null,
   "heartRate": [{ "timestamp": "2026-11-06T04:00:00.000Z", "bpm": 54 }],
+  "stress": [{ "timestamp": "2026-11-06T04:00:00.000Z", "value": 22 }],
+  "hrv": [{ "timestamp": "2026-11-06T04:00:00.000Z", "value": 48 }],
   "steps": [{ "timestamp": "2026-11-06T00:00:00.000Z", "steps": 0, "calories": 0, "distanceMeters": 0 }],
   "warnings": [],
   "sleep": [

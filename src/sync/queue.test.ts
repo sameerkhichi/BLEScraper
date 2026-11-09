@@ -17,6 +17,8 @@ function sample(bpm: number): UploadPayload {
     accelerometer: null,
     heartRate: [],
     steps: [],
+    stress: [],
+    hrv: [],
     sleep: [],
     warnings: [],
   };

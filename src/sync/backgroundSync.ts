@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as BackgroundTask from 'expo-background-task';
 import * as TaskManager from 'expo-task-manager';
 import { Platform } from 'react-native';
@@ -9,6 +10,7 @@ import { notifyBackgroundWake } from './notifyBattery';
 import { CATCHUP_HOURS, CATCHUP_INTERVAL_MINUTES } from './schedule';
 
 export const AUTO_SYNC_TASK = 'blescraper-auto-sync';
+const INTERVAL_KEY = 'blescraper.backgroundInterval';
 
 let expirationBound = false;
 
@@ -53,13 +55,15 @@ export async function syncBackgroundRegistration(enabled: boolean): Promise<void
       debugLog('Background sync is not available on this device.');
       return;
     }
-    // Leave a pending wake alone. Cancelling and registering again starts the 8 hour wait over,
-    // so the download only ran when the app was opened.
-    if (registered) {
+    const wanted = String(CATCHUP_INTERVAL_MINUTES);
+    const saved = await AsyncStorage.getItem(INTERVAL_KEY);
+    if (registered && saved === wanted) {
       debugLog(`Background download already scheduled, about every ${CATCHUP_HOURS} hours.`);
       return;
     }
+    if (registered) await BackgroundTask.unregisterTaskAsync(AUTO_SYNC_TASK);
     await BackgroundTask.registerTaskAsync(AUTO_SYNC_TASK, { minimumInterval: CATCHUP_INTERVAL_MINUTES });
+    await AsyncStorage.setItem(INTERVAL_KEY, wanted);
     debugLog(`Background download registered, about every ${CATCHUP_HOURS} hours.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Could not register background sync.';

@@ -1,12 +1,16 @@
 import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 
-import type { BatteryReading, HeartRateSample, SleepNight, StepSample } from '../model';
+import type { BatteryReading, HeartRateSample, MetricSample, RingChecks, SleepNight, StepSample, VitalSpot } from '../model';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
 import { getBleManager } from './manager';
 import { isValidPacket } from './packet';
-import type { RawSensorFrame } from './protocol';
 import {
+  type RawSensorFrame,
+  CMD_AUTO_HEART_RATE,
+  CMD_AUTO_HRV,
+  CMD_AUTO_SPO2,
+  CMD_AUTO_STRESS,
   CMD_BATTERY,
   CMD_GESTURE,
   CMD_RAW_SENSOR,
@@ -14,7 +18,13 @@ import {
   CMD_SET_TIME,
   CMD_START_REAL_TIME,
   CMD_STEPS,
+  type AutomaticChecks,
+  type HeartRateCheck,
   HeartRateLogParser,
+  IntervalLogParser,
+  type ToggleCheck,
+  writeHeartRateCheckPacket,
+  writeTogglePacket,
   RAW_SENSOR_DISABLE,
   RAW_SENSOR_ENABLE,
   REALTIME_HEART_RATE,
@@ -33,13 +43,18 @@ import {
   classifyWear,
   isPlausibleSpo2,
   parseBattery,
+  parseHeartRateCheck,
   parseLiveHeartRate,
+  parseToggle,
   gesturePacket,
   parseRawSensor,
   parseRealtime,
   rawSensorPacket,
+  readHeartRateCheckPacket,
   readHeartRatePacket,
+  readSeriesPacket,
   readStepsPacket,
+  readTogglePacket,
   setTimePacket,
   startHeartRatePacket,
   startRealtimePacket,
@@ -53,8 +68,10 @@ import {
   parseSleepPacket,
   sleepRequestPacket,
 } from './sleep';
+import { parseStoredSpo2, parseStoredTemperature, STORED_SPO2, STORED_TEMPERATURE, storedSeriesRequest } from './storedVitals';
 
 const HISTORY_TIMEOUT_MS = 15000;
+const SERIES_TIMEOUT_MS = 8000;
 const SHORT_TIMEOUT_MS = 5000;
 const HEART_RATE_TIMEOUT_MS = 35000;
 // Long enough to see an off-finger packet. The heart-rate measurement waits on its own.
@@ -269,10 +286,60 @@ export class RingClient {
 
   async getSleep(now = new Date()): Promise<SleepNight[]> {
     return this.run(async () => {
-      const packet = await this.readSleepPacket(HISTORY_TIMEOUT_MS);
+      const packet = await this.readBigData(sleepRequestPacket(), HISTORY_TIMEOUT_MS, 'Sleep');
       const nights = parseSleepPacket(packet, now);
       debugLog(`Sleep nights ${nights.length}`);
       return nights;
+    });
+  }
+
+  async applyAutomaticChecks(desired: RingChecks): Promise<AutomaticChecks> {
+    return this.run(async () => {
+      const current = await this.readAutomaticChecks([]);
+      const warnings: string[] = [];
+      if (current.heartRate.enabled !== desired.heartRate || current.heartRate.minutes !== desired.heartRateMinutes) {
+        try {
+          await this.request(
+            CMD_AUTO_HEART_RATE,
+            writeHeartRateCheckPacket({ enabled: desired.heartRate, minutes: desired.heartRateMinutes }),
+            (packet) => parseHeartRateCheck(packet),
+            SHORT_TIMEOUT_MS,
+          );
+        } catch (error) {
+          warnings.push(error instanceof Error ? error.message : 'Heart rate checks were not changed.');
+        }
+      }
+      await this.syncToggle(CMD_AUTO_SPO2, desired.spo2, current.spo2.enabled, 'Blood oxygen', warnings);
+      await this.syncToggle(CMD_AUTO_STRESS, desired.stress, current.stress.enabled, 'Stress', warnings);
+      await this.syncToggle(CMD_AUTO_HRV, desired.hrv, current.hrv?.enabled ?? null, 'HRV', warnings);
+      return this.readAutomaticChecks(warnings);
+    });
+  }
+
+  async getIntervalLog(command: number, day: Date): Promise<MetricSample[]> {
+    return this.run(async () => {
+      const parser = new IntervalLogParser();
+      const result = await this.request(
+        command,
+        readSeriesPacket(command, day),
+        (packet) => parser.parse(packet),
+        SERIES_TIMEOUT_MS,
+      );
+      return result.kind === 'none' ? [] : result.samples;
+    });
+  }
+
+  async getStoredSpo2(now = new Date()): Promise<VitalSpot[]> {
+    return this.run(async () => {
+      const packet = await this.readBigData(storedSeriesRequest(STORED_SPO2), HISTORY_TIMEOUT_MS, 'Blood oxygen');
+      return parseStoredSpo2(packet, now);
+    });
+  }
+
+  async getStoredTemperature(now = new Date()): Promise<VitalSpot[]> {
+    return this.run(async () => {
+      const packet = await this.readBigData(storedSeriesRequest(STORED_TEMPERATURE), HISTORY_TIMEOUT_MS, 'Temperature');
+      return parseStoredTemperature(packet, now);
     });
   }
 
@@ -628,9 +695,65 @@ export class RingClient {
     return result;
   }
 
-  private async readSleepPacket(timeoutMs: number): Promise<Uint8Array> {
+  private async readAutomaticChecks(warnings: string[]): Promise<AutomaticChecks> {
+    const heartRate = await this.readHeartRateCheck(warnings);
+    const spo2 = (await this.readToggle(CMD_AUTO_SPO2, 'Blood oxygen', warnings)) ?? { enabled: false };
+    const stress = (await this.readToggle(CMD_AUTO_STRESS, 'Stress', warnings)) ?? { enabled: false };
+    const hrv = await this.readToggle(CMD_AUTO_HRV, 'HRV', warnings);
+    return { heartRate, spo2, stress, hrv, warnings };
+  }
+
+  private async readHeartRateCheck(warnings: string[]): Promise<HeartRateCheck> {
+    try {
+      return await this.request(
+        CMD_AUTO_HEART_RATE,
+        readHeartRateCheckPacket(),
+        (packet) => parseHeartRateCheck(packet),
+        SHORT_TIMEOUT_MS,
+      );
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : 'Heart rate checks were not read.');
+      return { enabled: false, minutes: 0 };
+    }
+  }
+
+  private async readToggle(command: number, label: string, warnings: string[]): Promise<ToggleCheck | null> {
+    try {
+      return await this.request(
+        command,
+        readTogglePacket(command),
+        (packet) => parseToggle(command, packet),
+        SHORT_TIMEOUT_MS,
+      );
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : `${label} checks were not read.`);
+      return null;
+    }
+  }
+
+  private async syncToggle(
+    command: number,
+    desired: boolean,
+    current: boolean | null,
+    label: string,
+    warnings: string[],
+  ): Promise<void> {
+    if (current === desired) return;
+    try {
+      await this.request(
+        command,
+        writeTogglePacket(command, desired),
+        (packet) => parseToggle(command, packet),
+        SHORT_TIMEOUT_MS,
+      );
+    } catch (error) {
+      warnings.push(error instanceof Error ? error.message : `${label} checks were not changed.`);
+    }
+  }
+
+  private async readBigData(request: Uint8Array, timeoutMs: number, label: string): Promise<Uint8Array> {
     if (!this.bigDataReady) {
-      throw new Error('This ring did not expose sleep data.');
+      throw new Error(`This ring did not expose ${label.toLowerCase()} data.`);
     }
 
     const assembler = new BigDataAssembler();
@@ -648,7 +771,7 @@ export class RingClient {
         if (settled) return;
         settled = true;
         cleanup();
-        debugLog(`Sleep request on ${this.device.id} timed out after ${timeoutMs}ms`);
+        debugLog(`${label} request on ${this.device.id} timed out after ${timeoutMs}ms`);
         reject(new Error('The ring did not answer in time.'));
       }, timeoutMs);
       abort = (error: Error) => {
@@ -666,7 +789,7 @@ export class RingClient {
           cleanup();
           resolve(packet);
         } catch (error) {
-          abort(error instanceof Error ? error : new Error('Could not read the sleep packet.'));
+          abort(error instanceof Error ? error : new Error(`Could not read the ${label.toLowerCase()} packet.`));
         }
       };
       this.aborts.add(abort);
@@ -676,9 +799,9 @@ export class RingClient {
     pending.catch(() => undefined);
 
     try {
-      await this.sendBigData(sleepRequestPacket());
+      await this.sendBigData(request);
     } catch (error) {
-      abort(error instanceof Error ? error : new Error('Could not request sleep data.'));
+      abort(error instanceof Error ? error : new Error(`Could not request ${label.toLowerCase()} data.`));
     }
     return pending;
   }

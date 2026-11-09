@@ -1,7 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
-import { closeRing } from '../ble/ringClient';
+import { closeRing, openRing } from '../ble/ringClient';
+import { describeAutomaticChecks } from '../ble/protocol';
 import { debugLog, flushDebugLog, hydrateDebugLog } from '../ble/debugLog';
 import { getBleManager } from '../ble/manager';
 import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
@@ -41,6 +42,7 @@ type AppContextValue = {
   sendPending: () => Promise<void>;
   removePending: (id: string) => Promise<void>;
   clearPending: () => Promise<void>;
+  applyRingChecks: () => Promise<string>;
 };
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -207,6 +209,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const applyRingChecks = useCallback(async (): Promise<string> => {
+    const stored = await loadSettings();
+    if (!stored.ringId) return 'Choose a ring before applying checks.';
+    return withRing(async () => {
+      setStatus('Writing the ring checks');
+      const client = await openRing(stored.ringId as string);
+      const report = await client.applyAutomaticChecks(stored.ringChecks);
+      const message = describeAutomaticChecks(report);
+      setStatus(message);
+      return message;
+    });
+  }, [withRing]);
+
   const saveAppSettings = useCallback(
     async (next: AppSettings) => {
       setSettings(next);
@@ -272,7 +287,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       }
       try {
         const previous = await loadLastPayload();
-        const collected = await syncRing(stored.ringId, stored.ringName, setStatus);
+        const collected = await syncRing(stored.ringId, stored.ringName, setStatus, stored.ringChecks);
         await closeRing();
         if (!collected.worn) {
           if (!collected.sleepLoaded) {
@@ -465,6 +480,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendPending,
       removePending,
       clearPending,
+      applyRingChecks,
     }),
     [
       ready,
@@ -484,6 +500,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendPending,
       removePending,
       clearPending,
+      applyRingChecks,
     ],
   );
 

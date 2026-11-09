@@ -3,15 +3,13 @@ import test from 'node:test';
 
 import type { UploadPayload } from '../model';
 import {
+  DOWNLOAD_INTERVAL_MS,
   emptyAutoSyncState,
   evaluateSchedule,
   evaluateUpload,
-  HISTORY_INTERVAL_MS,
   readingChanged,
   RETRY_INTERVAL_MS,
-  SLEEP_INTERVAL_MS,
   UPLOAD_INTERVAL_MS,
-  VITALS_INTERVAL_MS,
 } from './schedule';
 
 const t0 = Date.parse('2026-11-06T12:00:00.000Z');
@@ -29,49 +27,42 @@ function payload(patch: Partial<UploadPayload> = {}): UploadPayload {
     accelerometer: null,
     heartRate: [{ timestamp: '2026-11-06T12:00:00.000Z', bpm: 60 }],
     steps: [{ timestamp: '2026-11-06T12:00:00.000Z', steps: 10, calories: 1, distanceMeters: 8 }],
+    stress: [],
+    hrv: [],
     sleep: [],
     warnings: [],
     ...patch,
   };
 }
 
-test('the first check reads logs, live vitals, and sleep', () => {
+test('the first check downloads logs and sleep without a live reading', () => {
   const decision = evaluateSchedule(emptyAutoSyncState, t0);
-  assert.deepEqual(decision.plan, { logs: true, vitals: true, sleep: true });
+  assert.deepEqual(decision.plan, { logs: true, vitals: false, sleep: true });
   assert.equal(decision.waitMs, 0);
 });
 
-test('a fresh check waits until the next log interval', () => {
+test('a fresh download waits out the rest of the interval', () => {
   const decision = evaluateSchedule(
-    { logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: new Date(t0).toISOString(), failedAt: null },
+    { ...emptyAutoSyncState, logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: new Date(t0).toISOString() },
     t0 + 10 * 60 * 1000,
   );
   assert.equal(decision.plan.logs, false);
   assert.equal(decision.plan.vitals, false);
-  assert.equal(decision.waitMs, 5 * 60 * 1000);
-});
-
-test('logs are due at 15 minutes and live vitals stay off until 30', () => {
-  const decision = evaluateSchedule(
-    { logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: new Date(t0).toISOString(), failedAt: null },
-    t0 + HISTORY_INTERVAL_MS,
-  );
-  assert.deepEqual(decision.plan, { logs: true, vitals: false, sleep: false });
-});
-
-test('live vitals share the connection with a log refresh', () => {
-  const decision = evaluateSchedule(
-    { logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: new Date(t0).toISOString(), failedAt: null },
-    t0 + VITALS_INTERVAL_MS,
-  );
-  assert.equal(decision.plan.logs, true);
-  assert.equal(decision.plan.vitals, true);
   assert.equal(decision.plan.sleep, false);
+  assert.equal(decision.waitMs, DOWNLOAD_INTERVAL_MS - 10 * 60 * 1000);
 });
 
-test('sleep does not turn the ring lights on', () => {
+test('logs and sleep download together when the interval has passed', () => {
   const decision = evaluateSchedule(
-    { logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: null, failedAt: null },
+    { ...emptyAutoSyncState, logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: new Date(t0).toISOString() },
+    t0 + DOWNLOAD_INTERVAL_MS,
+  );
+  assert.deepEqual(decision.plan, { logs: true, vitals: false, sleep: true });
+});
+
+test('a due sleep read downloads the logs on the same connection', () => {
+  const decision = evaluateSchedule(
+    { ...emptyAutoSyncState, logsAt: new Date(t0).toISOString(), vitalsAt: new Date(t0).toISOString(), sleepAt: null },
     t0 + 60 * 1000,
   );
   assert.equal(decision.plan.logs, true);
@@ -87,24 +78,24 @@ test('an unworn ring stays asleep until the next log interval', () => {
   assert.equal(cooling.plan.logs, false);
   assert.equal(cooling.plan.vitals, false);
   assert.equal(cooling.plan.sleep, false);
-  assert.equal(cooling.waitMs, HISTORY_INTERVAL_MS - 2 * 60 * 1000);
+  assert.equal(cooling.waitMs, DOWNLOAD_INTERVAL_MS - 2 * 60 * 1000);
 
   const ready = evaluateSchedule(
     { ...emptyAutoSyncState, asleepAt: new Date(t0).toISOString() },
-    t0 + HISTORY_INTERVAL_MS,
+    t0 + DOWNLOAD_INTERVAL_MS,
   );
   assert.equal(ready.plan.logs, true);
   assert.equal(ready.plan.sleep, true);
   assert.equal(ready.waitMs, 0);
 });
 
-test('an open app checks sleep when that is sooner than the next log read', () => {
+test('a download waits for whichever of logs or sleep is sooner', () => {
   const decision = evaluateSchedule(
     {
       ...emptyAutoSyncState,
       logsAt: new Date(t0).toISOString(),
       vitalsAt: new Date(t0).toISOString(),
-      sleepAt: new Date(t0 - SLEEP_INTERVAL_MS + 60 * 1000).toISOString(),
+      sleepAt: new Date(t0 - DOWNLOAD_INTERVAL_MS + 60 * 1000).toISOString(),
     },
     t0,
   );
@@ -140,7 +131,7 @@ test('a clock jump does not schedule a multi-hour wait', () => {
     t0,
   );
   assert.equal(decision.plan.logs, false);
-  assert.equal(decision.waitMs, HISTORY_INTERVAL_MS);
+  assert.equal(decision.waitMs, DOWNLOAD_INTERVAL_MS);
 });
 
 test('an empty queue does not schedule an upload', () => {

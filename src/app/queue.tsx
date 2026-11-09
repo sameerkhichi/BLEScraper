@@ -23,6 +23,10 @@ function describe(payload: UploadPayload): string[] {
     lines.push(`Accelerometer ${x.toFixed(2)} x, ${y.toFixed(2)} y, ${z.toFixed(2)} z g`);
   }
   if (heartRate > 0) lines.push(`${heartRate} stored heart-rate sample${heartRate === 1 ? '' : 's'}`);
+  const stress = count(payload.stress);
+  const hrv = count(payload.hrv);
+  if (stress > 0) lines.push(`${stress} stress sample${stress === 1 ? '' : 's'}`);
+  if (hrv > 0) lines.push(`${hrv} HRV sample${hrv === 1 ? '' : 's'}`);
   if (steps > 0) lines.push(`${steps} step sample${steps === 1 ? '' : 's'}`);
   if (sleep > 0) lines.push(`${sleep} sleep night${sleep === 1 ? '' : 's'}`);
   if (payload.battery) {

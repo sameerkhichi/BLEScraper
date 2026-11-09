@@ -13,7 +13,17 @@ export const GESTURE_WAVE = 2;
 export const CMD_SET_TIME = 1;
 export const CMD_BATTERY = 3;
 export const CMD_READ_HEART_RATE = 21;
+export const CMD_AUTO_HEART_RATE = 22;
+export const CMD_AUTO_SPO2 = 0x2c;
+export const CMD_AUTO_STRESS = 0x36;
+export const CMD_READ_STRESS = 0x37;
+export const CMD_AUTO_HRV = 0x38;
+export const CMD_READ_HRV = 0x39;
 export const CMD_STEPS = 67;
+export const PREF_READ = 1;
+export const PREF_WRITE = 2;
+export const PREF_ENABLED = 1;
+export const PREF_DISABLED = 2;
 export const CMD_START_REAL_TIME = 105;
 export const CMD_STOP_REAL_TIME = 106;
 export const CMD_RAW_SENSOR = 0xa1;
@@ -95,6 +105,73 @@ export function smoothHeartRate(samples: number[]): number | null {
 
 export function stopRealtimePacket(readingType: number): Uint8Array {
   return makePacket(CMD_STOP_REAL_TIME, [readingType, 0, 0]);
+}
+
+export type HeartRateCheck = {
+  enabled: boolean;
+  minutes: number;
+};
+
+export type ToggleCheck = {
+  enabled: boolean;
+};
+
+export type AutomaticChecks = {
+  heartRate: HeartRateCheck;
+  spo2: ToggleCheck;
+  stress: ToggleCheck;
+  hrv: ToggleCheck | null;
+  warnings: string[];
+};
+
+export function readHeartRateCheckPacket(): Uint8Array {
+  return makePacket(CMD_AUTO_HEART_RATE, [PREF_READ]);
+}
+
+export function writeHeartRateCheckPacket(check: HeartRateCheck): Uint8Array {
+  const minutes = Math.min(255, Math.max(1, Math.round(check.minutes)));
+  return makePacket(CMD_AUTO_HEART_RATE, [PREF_WRITE, check.enabled ? PREF_ENABLED : PREF_DISABLED, minutes]);
+}
+
+export function parseHeartRateCheck(packet: Uint8Array): HeartRateCheck | null {
+  if (packet[0] !== CMD_AUTO_HEART_RATE) return null;
+  return {
+    enabled: packet[2] === PREF_ENABLED,
+    minutes: packet[3] ?? 0,
+  };
+}
+
+export function readTogglePacket(command: number): Uint8Array {
+  return makePacket(command, [PREF_READ]);
+}
+
+export function writeTogglePacket(command: number, enabled: boolean): Uint8Array {
+  return makePacket(command, [PREF_WRITE, enabled ? PREF_ENABLED : PREF_DISABLED]);
+}
+
+export function parseToggle(command: number, packet: Uint8Array): ToggleCheck | null {
+  if (packet[0] !== command) return null;
+  return { enabled: packet[2] === PREF_ENABLED };
+}
+
+export function readSeriesPacket(command: number, day: Date): Uint8Array {
+  const midnight = Date.UTC(day.getUTCFullYear(), day.getUTCMonth(), day.getUTCDate());
+  return makePacket(command, writeInt32LE(Math.floor(midnight / 1000)));
+}
+
+export function describeAutomaticChecks(report: AutomaticChecks): string {
+  const heart = report.heartRate.enabled
+    ? `Heart rate every ${report.heartRate.minutes} minutes`
+    : 'Heart rate off';
+  const hrv = report.hrv ? (report.hrv.enabled ? 'HRV on' : 'HRV off') : 'HRV is not available on this ring';
+  const sentence = [
+    heart,
+    report.spo2.enabled ? 'Blood oxygen on' : 'Blood oxygen off',
+    report.stress.enabled ? 'Stress on' : 'Stress off',
+    hrv,
+  ].join('. ');
+  const warnings = report.warnings.filter((warning) => warning.length > 0);
+  return warnings.length > 0 ? `${sentence}. ${warnings.join(' ')}` : `${sentence}.`;
 }
 
 export function parseRealtime(packet: Uint8Array):
@@ -292,6 +369,113 @@ function signChanges(values: number[], deadband: number): number {
 function span(values: number[]): number {
   if (values.length === 0) return 0;
   return Math.max(...values) - Math.min(...values);
+}
+
+export type IntervalSample = {
+  timestamp: string;
+  value: number;
+};
+
+export type IntervalLog = {
+  kind: 'log';
+  samples: IntervalSample[];
+};
+
+// Stress and HRV use the heart-rate log framing. The header's range is the minutes between slots.
+export class IntervalLogParser {
+  private raw: number[] = [];
+  private timestampMs: number | null = null;
+  private size = 0;
+  private index = 0;
+  private range = 30;
+
+  reset(): void {
+    this.raw = [];
+    this.timestampMs = null;
+    this.size = 0;
+    this.index = 0;
+    this.range = 30;
+  }
+
+  parse(packet: Uint8Array): IntervalLog | NoData | null {
+    const subType = packet[1];
+    if (subType === 255) {
+      this.reset();
+      return { kind: 'none' };
+    }
+
+    if (this.isToday() && subType === 23) {
+      const result = this.toLog();
+      this.reset();
+      return result;
+    }
+
+    if (subType === 0) {
+      this.size = packet[2];
+      this.range = packet[3] || 30;
+      this.raw = Array(this.size * 13).fill(-1);
+      this.index = 0;
+      this.timestampMs = null;
+      return null;
+    }
+
+    if (subType === 1) {
+      this.timestampMs = readInt32LE(packet, 2) * 1000;
+      for (let offset = 0; offset < 9; offset += 1) {
+        this.raw[offset] = packet[6 + offset];
+      }
+      this.index += 9;
+      return null;
+    }
+
+    for (let offset = 0; offset < 13; offset += 1) {
+      this.raw[this.index + offset] = packet[2 + offset];
+    }
+    this.index += 13;
+
+    if (subType === this.size - 1) {
+      const result = this.toLog();
+      this.reset();
+      return result;
+    }
+
+    return null;
+  }
+
+  private isToday(): boolean {
+    if (this.timestampMs === null) return false;
+    const stamp = new Date(this.timestampMs);
+    const now = new Date();
+    return (
+      stamp.getUTCFullYear() === now.getUTCFullYear() &&
+      stamp.getUTCMonth() === now.getUTCMonth() &&
+      stamp.getUTCDate() === now.getUTCDate()
+    );
+  }
+
+  private toLog(): IntervalLog {
+    if (this.timestampMs === null) {
+      throw new Error('The log did not include a timestamp.');
+    }
+
+    const values = this.raw.slice();
+    if (this.isToday()) {
+      const now = new Date();
+      const slot = Math.floor((now.getUTCHours() * 60 + now.getUTCMinutes()) / this.range);
+      for (let index = slot; index < values.length; index += 1) values[index] = 0;
+    }
+
+    const start = this.timestampMs;
+    const samples: IntervalSample[] = [];
+    values.forEach((value, index) => {
+      if (value <= 0 || value >= 255) return;
+      samples.push({
+        timestamp: new Date(start + index * this.range * 60 * 1000).toISOString(),
+        value,
+      });
+    });
+    return { kind: 'log', samples };
+  }
 }
 
 export class HeartRateLogParser {

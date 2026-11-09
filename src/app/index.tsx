@@ -16,10 +16,10 @@ import {
   Thermometer,
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
-import type { UploadPayload, VitalSpot } from '../model';
+import { RING_HEART_RATE_MINUTES, type UploadPayload, type VitalSpot } from '../model';
 import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
 import { pauseAutoSync } from '../sync/ringGate';
-import { CATCHUP_HOURS, HISTORY_MINUTES, SLEEP_HOURS, VITALS_MINUTES } from '../sync/schedule';
+import { CATCHUP_HOURS } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 const BEAT_POINTS = 40;
@@ -308,7 +308,7 @@ export default function HomeScreen() {
             {queue.length === 0 ? 'Nothing waiting to send.' : `${queue.length} reading${queue.length === 1 ? '' : 's'} waiting.`}
           </Text>
           <Button label="View waiting readings" onPress={() => router.push('/queue')} tone="secondary" />
-          <Button label="API settings" onPress={() => router.push('/settings')} tone="secondary" />
+          <Button label="Settings" onPress={() => router.push('/settings')} tone="secondary" />
         </Card>
 
         <Button disabled={busy} label="Sync ring" onPress={syncRing} />
@@ -322,10 +322,10 @@ export default function HomeScreen() {
                   Leave BLEScraper in the app switcher. The screen can be off, and another app can be in front.
                 </Text>
                 <Text style={styles.body}>
-                  Steps and stored heart rate are read every {HISTORY_MINUTES} minutes while BLEScraper is on screen. Live heart rate, SpO2, and temperature run every {VITALS_MINUTES} minutes. Sleep is read about every {SLEEP_HOURS} hours. Each check connects, reads, and disconnects.
+                  The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper does not take those readings on its own. Turn them on or off under Settings, in the Arduino card. Apply to ring writes them now.
                 </Text>
                 <Text style={styles.body}>
-                  With the screen off or another app in front, that timer pauses. Opening BLEScraper runs a check when one is due. About every {CATCHUP_HOURS} hours the phone wakes on its own, downloads the stored record, and if the ring is being worn takes one blood-oxygen and temperature reading. Then it sends and disconnects. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks.
+                  About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks.
                 </Text>
                 <Text style={styles.body}>
                   A notification appears when that wake starts, separate from opening the app. iOS chooses the wake time and will not wake the app after you swipe it away. Android also shows a notification while a download is running.
@@ -333,7 +333,7 @@ export default function HomeScreen() {
               </>
             ) : (
               <Text style={styles.body}>
-                Automatic download is off. Turn it on in API settings. With it on, leave BLEScraper in the app switcher. Checks every {HISTORY_MINUTES} minutes run while the app is on screen. With the screen off or another app in front, the phone wakes about every {CATCHUP_HOURS} hours.
+                Automatic download is off. Turn it on under Settings, in the Arduino card. With it on, leave BLEScraper in the app switcher. The phone wakes about every {CATCHUP_HOURS} hours to download what the ring has stored.
               </Text>
             )}
           </View>

@@ -3,21 +3,25 @@ import { useEffect, useState } from 'react';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { Button, colors } from '../components/ui';
+import { RING_HEART_RATE_MINUTES, type RingChecks } from '../model';
 import { LOW_BATTERY_PERCENT, LOW_BATTERY_REMIND_HOURS } from '../sync/batteryAlert';
-import { CATCHUP_HOURS, HISTORY_MINUTES, SLEEP_HOURS, VITALS_MINUTES } from '../sync/schedule';
+import { CATCHUP_HOURS } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 export default function SettingsScreen() {
-  const { busy, settings, saveAppSettings } = useAppState();
+  const { busy, settings, saveAppSettings, applyRingChecks } = useAppState();
   const [apiUrl, setApiUrl] = useState(settings.apiUrl);
   const [apiKey, setApiKey] = useState(settings.apiKey);
   const [autoSync, setAutoSync] = useState(settings.autoSync);
+  const [checks, setChecks] = useState<RingChecks>(settings.ringChecks);
+  const [checkNote, setCheckNote] = useState('');
 
   useEffect(() => {
     setApiUrl(settings.apiUrl);
     setApiKey(settings.apiKey);
     setAutoSync(settings.autoSync);
-  }, [settings.apiUrl, settings.apiKey, settings.autoSync]);
+    setChecks(settings.ringChecks);
+  }, [settings.apiUrl, settings.apiKey, settings.autoSync, settings.ringChecks]);
 
   const save = async () => {
     await saveAppSettings({
@@ -25,6 +29,7 @@ export default function SettingsScreen() {
       apiUrl: apiUrl.trim(),
       apiKey: apiKey.trim(),
       autoSync,
+      ringChecks: { ...checks, heartRateMinutes: RING_HEART_RATE_MINUTES },
     });
     router.back();
   };
@@ -32,6 +37,33 @@ export default function SettingsScreen() {
   const toggleAutoSync = (value: boolean) => {
     setAutoSync(value);
     void saveAppSettings({ ...settings, autoSync: value });
+  };
+
+  const updateCheck = (key: 'heartRate' | 'spo2' | 'stress' | 'hrv', value: boolean) => {
+    const next = { ...checks, [key]: value, heartRateMinutes: RING_HEART_RATE_MINUTES };
+    setChecks(next);
+    void saveAppSettings({
+      ...settings,
+      apiUrl: apiUrl.trim(),
+      apiKey: apiKey.trim(),
+      ringChecks: next,
+    });
+  };
+
+  const apply = async () => {
+    const next = { ...checks, heartRateMinutes: RING_HEART_RATE_MINUTES };
+    await saveAppSettings({
+      ...settings,
+      apiUrl: apiUrl.trim(),
+      apiKey: apiKey.trim(),
+      autoSync,
+      ringChecks: next,
+    });
+    try {
+      setCheckNote(await applyRingChecks());
+    } catch (error) {
+      setCheckNote(error instanceof Error ? error.message : 'The ring checks were not updated.');
+    }
   };
 
   return (
@@ -44,9 +76,8 @@ export default function SettingsScreen() {
           <View style={styles.rowText}>
             <Text style={styles.label}>Keep syncing</Text>
             <Text style={styles.body}>
-              While BLEScraper is on screen, steps and stored heart rate are read every {HISTORY_MINUTES} minutes. Live heart rate, SpO2, and temperature run every {VITALS_MINUTES} minutes. Sleep is read about every {SLEEP_HOURS} hours. Each check connects, reads, and disconnects.
-              With the screen off or another app in front, that timer pauses. Leave the app in the switcher. About every {CATCHUP_HOURS} hours the phone wakes on its own, downloads the stored record, and if the ring is being worn takes one blood-oxygen and temperature reading. Then it sends and disconnects. Opening the app runs a check when one is due.
-              A notification appears when that wake starts, separate from opening the app. iOS chooses the wake time and will not wake the app after you swipe it away. Android also shows a notification while a download is running.
+              The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper downloads the stored record about every {CATCHUP_HOURS} hours, sends it, and disconnects. Opening the app runs that download when one is due. Leaving the app open does not start extra sensor checks.
+              Leave the app in the switcher. iOS chooses the wake time and will not wake the app after you swipe it away. Android shows a notification while a download is running.
             </Text>
           </View>
           <Switch
@@ -60,6 +91,16 @@ export default function SettingsScreen() {
         <Text style={styles.body}>
           The phone notifies you when the ring battery is below {LOW_BATTERY_PERCENT}%. It notifies again if the level drops, and every {LOW_BATTERY_REMIND_HOURS} hours while it stays that low.
         </Text>
+        <Text style={styles.label}>Ring checks</Text>
+        <Text style={styles.body}>
+          These run on the ring after the phone disconnects. Heart rate is every {RING_HEART_RATE_MINUTES} minutes. The other three follow that cycle. Apply writes them now. The next download writes them again if the ring disagrees.
+        </Text>
+        <CheckRow label={`Heart rate every ${RING_HEART_RATE_MINUTES} minutes`} onValueChange={(value) => updateCheck('heartRate', value)} value={checks.heartRate} />
+        <CheckRow label="Blood oxygen" onValueChange={(value) => updateCheck('spo2', value)} value={checks.spo2} />
+        <CheckRow label="Stress" onValueChange={(value) => updateCheck('stress', value)} value={checks.stress} />
+        <CheckRow label="HRV" onValueChange={(value) => updateCheck('hrv', value)} value={checks.hrv} />
+        {checkNote ? <Text style={styles.body}>{checkNote}</Text> : null}
+        <Button disabled={busy} label="Apply to ring" onPress={() => void apply()} tone="secondary" />
         <Text style={styles.label}>API URL</Text>
         <TextInput
           autoCapitalize="none"
@@ -85,6 +126,29 @@ export default function SettingsScreen() {
         <Button disabled={busy} label="Save" onPress={() => void save()} />
       </ScrollView>
     </KeyboardAvoidingView>
+  );
+}
+
+function CheckRow({
+  label,
+  value,
+  onValueChange,
+}: {
+  label: string;
+  value: boolean;
+  onValueChange: (value: boolean) => void;
+}) {
+  return (
+    <View style={styles.row}>
+      <Text style={[styles.body, styles.rowText]}>{label}</Text>
+      <Switch
+        accessibilityLabel={label}
+        onValueChange={onValueChange}
+        thumbColor={colors.text}
+        trackColor={{ false: colors.line, true: colors.accent }}
+        value={value}
+      />
+    </View>
   );
 }
 
