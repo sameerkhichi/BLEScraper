@@ -13,7 +13,7 @@ import {
   type UploadPayload,
 } from '../model';
 import type { PendingUpload } from './queue';
-import { reportBattery } from './notifyBattery';
+import { reportBattery, reportTemperature } from './notifyBattery';
 import { emptyAutoSyncState, type AutoSyncState } from './schedule';
 
 const SETTINGS_KEY = 'blescraper.settings';
@@ -82,6 +82,7 @@ export async function loadLastPayload(): Promise<UploadPayload | null> {
 export async function saveLastPayload(payload: UploadPayload): Promise<void> {
   await AsyncStorage.setItem(LAST_KEY, JSON.stringify(payload));
   await reportBattery(payload.battery);
+  await reportTemperature(payload.bodyTemperatureC);
 }
 
 export async function loadAutoSyncState(): Promise<AutoSyncState> {

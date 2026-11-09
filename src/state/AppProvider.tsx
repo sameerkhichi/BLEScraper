@@ -9,7 +9,7 @@ import { getBleManager } from '../ble/manager';
 import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
 import { syncBackgroundRegistration } from '../sync/backgroundSync';
-import { ensureNotificationPermission, reportBattery } from '../sync/notifyBattery';
+import { ensureNotificationPermission, reportBattery, reportTemperature } from '../sync/notifyBattery';
 import { enqueue, flushQueue, forgetDropped, markDropped, removeFromQueue, type PendingUpload } from '../sync/queue';
 import { ringBusy, runWithQueue, runWithRing, subscribeRingBusy } from '../sync/ringGate';
 import { evaluateUpload } from '../sync/schedule';
@@ -128,7 +128,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setLastPayload(storedLast);
       try {
         await ensureNotificationPermission(true);
-        if (!cancelled) await reportBattery(storedLast?.battery ?? null);
+        if (!cancelled) {
+          await reportBattery(storedLast?.battery ?? null);
+          await reportTemperature(storedLast?.bodyTemperatureC ?? null);
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Could not ask for notifications.';
         debugLog(message);

@@ -4,10 +4,14 @@ import { Platform } from 'react-native';
 import { debugLog } from '../ble/debugLog';
 import type { BatteryReading } from '../model';
 import { batteryAlertCopy, nextBatteryNotice, type BatteryNotice } from './batteryAlert';
+import { nextTemperatureNotice, temperatureAlertCopy, type TemperatureNotice } from './temperatureAlert';
 
 const NOTICE_KEY = 'blescraper.batteryNotice';
+const TEMP_NOTICE_KEY = 'blescraper.temperatureNotice';
 const CHANNEL_ID = 'ring-battery';
 const NOTIFICATION_ID = 'ring-battery-low';
+const TEMP_CHANNEL_ID = 'ring-temperature';
+const TEMP_NOTIFICATION_ID = 'ring-temperature';
 const WAKE_CHANNEL_ID = 'ring-wake';
 
 type NotificationsModule = typeof import('expo-notifications');
@@ -16,12 +20,14 @@ let notificationsModule: Promise<NotificationsModule | null> | null = null;
 const channelReady = new Map<string, Promise<void>>();
 let permissionRequested = false;
 let loggedMissingPermission = false;
+let loggedMissingTemperaturePermission = false;
 let delivery: Promise<void> = Promise.resolve();
 
 export async function ensureNotificationPermission(request: boolean): Promise<boolean> {
   const notifications = await loadNotifications();
   if (!notifications) return false;
   await ensureChannel(notifications);
+  await ensureTemperatureChannel(notifications);
   const current = await notifications.getPermissionsAsync();
   if (current.status === 'granted') return true;
   if (!request || permissionRequested) return false;
@@ -66,7 +72,15 @@ export async function notifyBackgroundWake(startedAt: Date): Promise<void> {
 }
 
 export function reportBattery(battery: BatteryReading | null): Promise<void> {
-  const run = delivery.then(() => deliverBatteryAlert(battery));
+  return enqueueDelivery(() => deliverBatteryAlert(battery));
+}
+
+export function reportTemperature(celsius: number | null): Promise<void> {
+  return enqueueDelivery(() => deliverTemperatureAlert(celsius));
+}
+
+function enqueueDelivery(deliver: () => Promise<void>): Promise<void> {
+  const run = delivery.then(deliver);
   delivery = run.then(
     () => undefined,
     () => undefined,
@@ -115,6 +129,55 @@ async function deliverBatteryAlert(battery: BatteryReading | null): Promise<void
   }
 }
 
+async function deliverTemperatureAlert(celsius: number | null): Promise<void> {
+  try {
+    const previous = await loadTemperatureNotice();
+    const decision = nextTemperatureNotice(celsius, previous, Date.now());
+    if (!decision.notify || typeof celsius !== 'number') {
+      if (previous && !decision.next) await dismissTemperature();
+      if (!sameTemperatureNotice(previous, decision.next)) await saveTemperatureNotice(decision.next);
+      return;
+    }
+
+    const notifications = await loadNotifications();
+    if (!notifications) return;
+    await ensureTemperatureChannel(notifications);
+    const allowed = await ensureNotificationPermission(false);
+    if (!allowed) {
+      if (!loggedMissingTemperaturePermission) {
+        loggedMissingTemperaturePermission = true;
+        debugLog('Body temperature is out of range. Notification permission is off.');
+      }
+      return;
+    }
+
+    const copy = temperatureAlertCopy(celsius);
+    await notifications.dismissNotificationAsync(TEMP_NOTIFICATION_ID).catch(() => undefined);
+    await notifications.scheduleNotificationAsync({
+      identifier: TEMP_NOTIFICATION_ID,
+      content: {
+        title: copy.title,
+        body: copy.body,
+        sound: 'default',
+        interruptionLevel: 'active',
+        data: { kind: 'temperature', celsius, stage: decision.next?.stage },
+      },
+      trigger: Platform.OS === 'android' ? { channelId: TEMP_CHANNEL_ID } : null,
+    });
+    await saveTemperatureNotice(decision.next);
+    debugLog(copy.body);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Could not send the temperature notification.';
+    debugLog(message);
+  }
+}
+
+async function dismissTemperature(): Promise<void> {
+  const notifications = await loadNotifications();
+  if (!notifications) return;
+  await notifications.dismissNotificationAsync(TEMP_NOTIFICATION_ID).catch(() => undefined);
+}
+
 function loadNotifications(): Promise<NotificationsModule | null> {
   if (Platform.OS === 'web') return Promise.resolve(null);
   notificationsModule ??= import('expo-notifications')
@@ -143,6 +206,10 @@ function ensureChannel(notifications: NotificationsModule): Promise<void> {
 
 function ensureWakeChannel(notifications: NotificationsModule): Promise<void> {
   return ensureAndroidChannel(notifications, WAKE_CHANNEL_ID, 'Background wake', [0, 200]);
+}
+
+function ensureTemperatureChannel(notifications: NotificationsModule): Promise<void> {
+  return ensureAndroidChannel(notifications, TEMP_CHANNEL_ID, 'Body temperature', [0, 280, 120, 280]);
 }
 
 function ensureAndroidChannel(
@@ -191,4 +258,33 @@ function sameNotice(left: BatteryNotice | null, right: BatteryNotice | null): bo
   if (left === right) return true;
   if (!left || !right) return false;
   return left.level === right.level && left.notifiedAt === right.notifiedAt;
+}
+
+async function loadTemperatureNotice(): Promise<TemperatureNotice | null> {
+  const raw = await AsyncStorage.getItem(TEMP_NOTICE_KEY);
+  if (!raw) return null;
+  const parsed = JSON.parse(raw) as Partial<TemperatureNotice>;
+  if (!isAbnormalStage(parsed.stage) || typeof parsed.celsius !== 'number' || !Number.isFinite(parsed.celsius)) {
+    return null;
+  }
+  if (typeof parsed.notifiedAt !== 'string') return null;
+  return { stage: parsed.stage, celsius: parsed.celsius, notifiedAt: parsed.notifiedAt };
+}
+
+async function saveTemperatureNotice(notice: TemperatureNotice | null): Promise<void> {
+  if (!notice) {
+    await AsyncStorage.removeItem(TEMP_NOTICE_KEY);
+    return;
+  }
+  await AsyncStorage.setItem(TEMP_NOTICE_KEY, JSON.stringify(notice));
+}
+
+function sameTemperatureNotice(left: TemperatureNotice | null, right: TemperatureNotice | null): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.stage === right.stage && left.celsius === right.celsius && left.notifiedAt === right.notifiedAt;
+}
+
+function isAbnormalStage(value: unknown): value is TemperatureNotice['stage'] {
+  return value === 'fever' || value === 'mild' || value === 'moderate' || value === 'severe';
 }

@@ -19,6 +19,7 @@ import {
 import { Button, Card, colors } from '../components/ui';
 import { RING_HEART_RATE_MINUTES, type UploadPayload, type VitalSpot } from '../model';
 import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
+import { FEVER_C, MILD_HYPOTHERMIA_C } from '../sync/temperatureAlert';
 import { pauseAutoSync } from '../sync/ringGate';
 import { CATCHUP_HOURS } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
@@ -332,7 +333,7 @@ export default function HomeScreen() {
                   The ring measures heart rate about every {RING_HEART_RATE_MINUTES} minutes while it is worn. Blood oxygen, stress, and HRV follow that cycle. BLEScraper does not take those readings on its own. Turn them on or off under Settings, in the Arduino card. Apply to ring writes them now.
                 </Text>
                 <Text style={styles.body}>
-                  About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks.
+                  About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.
                 </Text>
                 <Text style={styles.body}>
                   A notification appears when that wake starts, separate from opening the app. iOS chooses the wake time and will not wake the app after you swipe it away. Android also shows a notification while a download is running.

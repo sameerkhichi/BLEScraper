@@ -220,10 +220,11 @@ export function isPlausibleSpo2(value: number): boolean {
 }
 
 // Stored as tenths above a 20°C offset: 154 -> 35.4°C. Values under 11 are still warming up.
+// Below 28°C is kept so a severe-hypothermia reading can alert. Above 43°C is ignored.
 export function bodyTemperatureCelsius(raw: number): number | null {
   if (raw < 11) return null;
   const celsius = Math.round((raw / 10 + 20) * 10) / 10;
-  if (celsius < 28 || celsius > 43) return null;
+  if (celsius < 20 || celsius > 43) return null;
   return celsius;
 }
 

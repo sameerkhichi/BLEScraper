@@ -211,6 +211,9 @@ test('temperature and blood oxygen use their own realtime types', () => {
   assert.deepEqual(Array.from(packet.slice(0, 3)), [105, 0x0b, 1]);
   assert.equal(packet[15], 0x75);
   assert.equal(bodyTemperatureCelsius(0), null);
+  assert.equal(bodyTemperatureCelsius(10), null);
+  assert.equal(bodyTemperatureCelsius(79), 27.9);
+  assert.equal(bodyTemperatureCelsius(80), 28);
   assert.equal(bodyTemperatureCelsius(154), 35.4);
   assert.equal(bodyTemperatureCelsius(255), null);
 });

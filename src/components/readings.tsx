@@ -10,12 +10,28 @@ import {
   type SleepStageName,
   type StepSample,
 } from '../model';
+import {
+  FEVER_C,
+  MILD_HYPOTHERMIA_C,
+  MODERATE_HYPOTHERMIA_C,
+  SEVERE_HYPOTHERMIA_C,
+  fahrenheit,
+  temperatureZone,
+  type TemperatureTone,
+} from '../sync/temperatureAlert';
 import { colors } from './ui';
 
-const COLD = '#6ea8ff';
 const WARN = '#f0c36a';
-const TEMP_MIN = 35;
+const TEMP_MIN = 24;
 const TEMP_MAX = 40;
+const TEMP_TICKS = [40, FEVER_C, MILD_HYPOTHERMIA_C, MODERATE_HYPOTHERMIA_C, SEVERE_HYPOTHERMIA_C];
+const TEMP_BANDS = [
+  { high: TEMP_MAX, low: FEVER_C, color: 'rgba(255,139,120,0.45)' },
+  { high: FEVER_C, low: MILD_HYPOTHERMIA_C, color: 'rgba(155,231,176,0.35)' },
+  { high: MILD_HYPOTHERMIA_C, low: MODERATE_HYPOTHERMIA_C, color: 'rgba(240,195,106,0.4)' },
+  { high: MODERATE_HYPOTHERMIA_C, low: SEVERE_HYPOTHERMIA_C, color: 'rgba(255,159,110,0.45)' },
+  { high: SEVERE_HYPOTHERMIA_C, low: TEMP_MIN, color: 'rgba(255,107,107,0.5)' },
+];
 const CHART_HEIGHT = 148;
 const SCALE_MIN = 40;
 const SCALE_MAX = 200;
@@ -332,21 +348,35 @@ export function OxygenMeter({ spo2 }: { spo2: number | null }) {
 }
 
 export function Thermometer({ celsius }: { celsius: number | null }) {
-  const zone = celsius == null ? null : tempZone(celsius);
-  const mercuryColor = zone == null ? colors.line : zone.color;
+  const zone = celsius == null ? null : temperatureZone(celsius);
+  const mercuryColor = zone == null ? colors.line : toneColor(zone.tone);
   return (
     <View style={styles.thermoRow}>
       <View style={styles.ticks}>
-        <Text style={[styles.tick, styles.tickTop]}>40°</Text>
-        <Text style={[styles.tick, styles.tickHot]}>37.5°</Text>
-        <Text style={[styles.tick, styles.tickComfort]}>36°</Text>
-        <Text style={[styles.tick, styles.tickBottom]}>35°</Text>
+        {TEMP_TICKS.map((mark) => {
+          const top = (TEMP_MAX - mark) / (TEMP_MAX - TEMP_MIN);
+          return (
+            <Text key={mark} style={[styles.tick, { top: `${top * 100}%`, marginTop: top === 0 ? 0 : -7 }]}>
+              {Number.isInteger(mark) ? `${mark}°` : `${mark.toFixed(1)}°`}
+            </Text>
+          );
+        })}
       </View>
       <View style={styles.thermoColumn}>
         <View style={styles.tube}>
-          <View style={[styles.zone, styles.hotZone]} />
-          <View style={[styles.zone, styles.comfortZone]} />
-          <View style={[styles.zone, styles.coldZone]} />
+          {TEMP_BANDS.map((band) => (
+            <View
+              key={band.low}
+              style={[
+                styles.zone,
+                {
+                  backgroundColor: band.color,
+                  top: temperatureTop(band.high),
+                  height: temperatureHeight(band.low, band.high),
+                },
+              ]}
+            />
+          ))}
           <View style={styles.stem} />
           {celsius == null ? null : (
             <View
@@ -361,8 +391,8 @@ export function Thermometer({ celsius }: { celsius: number | null }) {
       </View>
       <View style={styles.thermoReading}>
         <Text style={styles.vitalValue}>{celsius == null ? '—' : `${celsius.toFixed(1)}°`}</Text>
-        <Text style={[styles.meta, zone ? { color: zone.color } : null]}>
-          {zone?.label ?? 'Measure to fill this in.'}
+        <Text style={[styles.meta, zone ? { color: toneColor(zone.tone) } : null]}>
+          {celsius == null || !zone ? 'Measure to fill this in.' : `${fahrenheit(celsius).toFixed(1)}°F · ${zone.label}`}
         </Text>
       </View>
     </View>
@@ -474,10 +504,18 @@ function markerPercent(spo2: number): number {
   return ((clamped - 85) / 15) * 100;
 }
 
-function tempZone(celsius: number): { label: string; color: string } {
-  if (celsius < 36) return { label: 'Too cold', color: COLD };
-  if (celsius >= 37.5) return { label: 'Too hot', color: colors.danger };
-  return { label: 'Just right', color: colors.ok };
+function toneColor(tone: TemperatureTone): string {
+  if (tone === 'ok') return colors.ok;
+  if (tone === 'warn') return WARN;
+  return colors.danger;
+}
+
+function temperatureTop(celsius: number): `${number}%` {
+  return `${((TEMP_MAX - celsius) / (TEMP_MAX - TEMP_MIN)) * 100}%`;
+}
+
+function temperatureHeight(low: number, high: number): `${number}%` {
+  return `${((high - low) / (TEMP_MAX - TEMP_MIN)) * 100}%`;
 }
 
 function temperatureFraction(celsius: number): number {
@@ -640,27 +678,13 @@ const styles = StyleSheet.create({
   },
   ticks: {
     height: 168,
-    width: 44,
+    width: 48,
   },
   tick: {
     color: colors.muted,
     fontSize: 11,
     position: 'absolute',
     right: 0,
-  },
-  tickTop: {
-    top: 0,
-  },
-  tickHot: {
-    marginTop: -8,
-    top: '50%',
-  },
-  tickComfort: {
-    marginTop: -8,
-    top: '80%',
-  },
-  tickBottom: {
-    bottom: 0,
   },
   thermoColumn: {
     alignItems: 'center',
@@ -679,21 +703,6 @@ const styles = StyleSheet.create({
     left: 0,
     position: 'absolute',
     right: 0,
-  },
-  hotZone: {
-    backgroundColor: 'rgba(255,139,120,0.45)',
-    height: '50%',
-    top: 0,
-  },
-  comfortZone: {
-    backgroundColor: 'rgba(155,231,176,0.35)',
-    height: '30%',
-    top: '50%',
-  },
-  coldZone: {
-    backgroundColor: 'rgba(110,168,255,0.45)',
-    height: '20%',
-    top: '80%',
   },
   stem: {
     backgroundColor: '#000000',

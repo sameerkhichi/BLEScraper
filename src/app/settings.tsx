@@ -6,6 +6,14 @@ import { openRing } from '../ble/ringClient';
 import { Button, colors } from '../components/ui';
 import { RING_HEART_RATE_MINUTES, type RingChecks } from '../model';
 import { LOW_BATTERY_PERCENT, LOW_BATTERY_REMIND_HOURS } from '../sync/batteryAlert';
+import {
+  FEVER_C,
+  MILD_HYPOTHERMIA_C,
+  MODERATE_HYPOTHERMIA_C,
+  SEVERE_HYPOTHERMIA_C,
+  TEMP_ALERT_REMIND_HOURS,
+  fahrenheit,
+} from '../sync/temperatureAlert';
 import { CATCHUP_HOURS } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
@@ -123,6 +131,9 @@ export default function SettingsScreen() {
         </View>
         <Text style={styles.body}>
           The phone notifies you when the ring battery is below {LOW_BATTERY_PERCENT}%. It notifies again if the level drops, and every {LOW_BATTERY_REMIND_HOURS} hours while it stays that low.
+        </Text>
+        <Text style={styles.body}>
+          Body temperature notifies at {FEVER_C}°C ({fahrenheit(FEVER_C).toFixed(1)}°F) or higher, and when it falls below {MILD_HYPOTHERMIA_C}°C ({fahrenheit(MILD_HYPOTHERMIA_C).toFixed(0)}°F, mild), {MODERATE_HYPOTHERMIA_C}°C ({fahrenheit(MODERATE_HYPOTHERMIA_C).toFixed(1)}°F, moderate), or {SEVERE_HYPOTHERMIA_C}°C ({fahrenheit(SEVERE_HYPOTHERMIA_C).toFixed(1)}°F, severe). It notifies again when the reading crosses a worse line, and every {TEMP_ALERT_REMIND_HOURS} hours while it stays there.
         </Text>
         <Text style={styles.label}>Ring wave detector</Text>
         <CheckRow
