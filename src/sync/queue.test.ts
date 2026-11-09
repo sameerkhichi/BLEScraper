@@ -115,6 +115,23 @@ test('a blood-oxygen reading keeps the last heart rate', () => {
   assert.equal(merged.syncedAt, '2026-11-06T00:01:00.000Z');
 });
 
+test('a live stress reading stays beside the stored samples', () => {
+  const previous = sample(72);
+  previous.stress = [{ timestamp: '2026-11-06T12:00:00.000Z', value: 40 }];
+  const next = sample(72);
+  next.stress = [{ timestamp: '2026-11-06T18:00:00.000Z', value: 55 }];
+
+  const merged = mergeReadings(previous, next, true);
+  assert.deepEqual(
+    merged.stress.map((item) => item.value),
+    [40, 55],
+  );
+  assert.deepEqual(
+    mergeReadings(previous, next, false).stress.map((item) => item.value),
+    [55],
+  );
+});
+
 test('a new heart rate records when it was taken', () => {
   const previous = sample(72);
   previous.realtimeHeartRateAt = '2026-11-06T00:00:00.000Z';

@@ -15,10 +15,11 @@ import {
   latestNight,
   OxygenMeter,
   SleepNightSummary,
+  StressPanel,
   Thermometer,
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
-import { RING_HEART_RATE_MINUTES, type UploadPayload, type VitalSpot } from '../model';
+import { RING_HEART_RATE_MINUTES, stressSummary, type UploadPayload, type VitalSpot } from '../model';
 import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
 import { FEVER_C, MILD_HYPOTHERMIA_C } from '../sync/temperatureAlert';
 import { pauseAutoSync } from '../sync/ringGate';
@@ -72,13 +73,16 @@ function latestSpot(spots: VitalSpot[] | undefined, field: 'spo2' | 'bodyTempera
 export default function HomeScreen() {
   const ringServices = useRingServices();
   const lastWake = useBackgroundWake();
-  const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing, recordHeartRate, withRing } =
+  const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing, recordHeartRate, recordStress, withRing } =
     useAppState();
   const [heartPhase, setHeartPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
   const [liveBpm, setLiveBpm] = useState<number | null>(null);
   const [beats, setBeats] = useState<number[]>([]);
   const [heartAt, setHeartAt] = useState<number | null>(null);
   const [heartError, setHeartError] = useState<string | null>(null);
+  const [stressPhase, setStressPhase] = useState<'idle' | 'measuring'>('idle');
+  const [liveStress, setLiveStress] = useState<number | null>(null);
+  const [stressError, setStressError] = useState<string | null>(null);
   const heartStop = useRef<(() => void) | null>(null);
   const heartMounted = useRef(true);
   const bpmRef = useRef<number | null>(null);
@@ -89,6 +93,7 @@ export default function HomeScreen() {
   const newestHeartRate = latestSample(lastPayload);
   const motion = lastPayload?.accelerometer;
   const night = latestNight(lastPayload?.sleep ?? []);
+  const dayStress = stressSummary(lastPayload?.stress ?? [], lastPayload?.sleep ?? []);
   const heartTaken =
     heartAt != null
       ? new Date(heartAt).toISOString()
@@ -159,6 +164,35 @@ export default function HomeScreen() {
     }
   };
 
+  const measureStressReading = async () => {
+    if (!settings.ringId) {
+      router.push('/scan');
+      return;
+    }
+    const ringId = settings.ringId;
+    setStressError(null);
+    setLiveStress(null);
+    setStressPhase('measuring');
+    const resume = pauseAutoSync();
+    try {
+      const value = await withRing(async () => {
+        const client = await openRing(ringId);
+        return client.measureStress();
+      });
+      if (value === null) {
+        setStressError('The ring did not return a stress reading.');
+        return;
+      }
+      setLiveStress(value);
+      await recordStress(value);
+    } catch (caught) {
+      setStressError(caught instanceof Error ? caught.message : 'The stress reading stopped.');
+    } finally {
+      resume();
+      setStressPhase('idle');
+    }
+  };
+
   const syncRing = () => {
     if (!settings.ringId) {
       router.push('/scan');
@@ -175,9 +209,9 @@ export default function HomeScreen() {
       >
         <Card>
           <ActivityChart
-            heartRate={lastPayload?.heartRate ?? []}
             sleep={lastPayload?.sleep ?? []}
             steps={lastPayload?.steps ?? []}
+            stress={lastPayload?.stress ?? []}
           />
           <TakenLine timestamp={latestToday(lastPayload?.steps ?? [])} />
         </Card>
@@ -232,6 +266,20 @@ export default function HomeScreen() {
         </Card>
 
         <Button disabled={busy} label="Scan all sensors" onPress={() => requireRing(() => void scan('all'))} />
+
+        <Card>
+          <Text style={styles.label}>Stress</Text>
+          <StressPanel live={stressPhase === 'measuring' ? liveStress : null} summary={dayStress} />
+          <TakenLine timestamp={dayStress.current?.timestamp ?? null} />
+          {stressError ? <Text style={styles.warning}>{stressError}</Text> : null}
+          {stressPhase === 'measuring' ? <ActivityIndicator color={colors.accent} /> : null}
+          <Button
+            disabled={busy || stressPhase === 'measuring'}
+            label="Measure stress"
+            onPress={() => void measureStressReading()}
+            tone="secondary"
+          />
+        </Card>
 
         <Card>
           <Text style={styles.label}>Sleep</Text>

@@ -16,6 +16,7 @@ import {
   parseBattery,
   classifyWear,
   parseLiveHeartRate,
+  parseLiveStress,
   parseRawSensor,
   recognizeHandGestures,
   recognizeRingGesture,
@@ -31,6 +32,7 @@ import {
   RAW_SENSOR_DISABLE,
   gesturePacket,
   rawSensorPacket,
+  REALTIME_STRESS,
   REALTIME_TEMPERATURE,
   setTimePacket,
   startRealtimePacket,
@@ -204,6 +206,15 @@ test('a heart-rate packet says whether the ring is being worn', () => {
   assert.equal(classifyWear(Uint8Array.of(105, 1, 0, 0)), 'pending');
   assert.equal(classifyWear(Uint8Array.of(105, 1, 2, 0)), 'pending');
   assert.equal(classifyWear(Uint8Array.of(105, 3, 1, 0)), 'pending');
+});
+
+test('live stress accepts the score in the value byte or on its own', () => {
+  assert.equal(parseLiveStress(Uint8Array.of(105, REALTIME_STRESS, 0, 42)), 42);
+  assert.equal(parseLiveStress(Uint8Array.of(105, REALTIME_STRESS, 1, 42)), 42);
+  assert.equal(parseLiveStress(Uint8Array.of(105, REALTIME_STRESS, 55, 0)), 55);
+  assert.equal(parseLiveStress(Uint8Array.of(105, REALTIME_STRESS, 1, 0)), null);
+  assert.equal(parseLiveStress(Uint8Array.of(105, REALTIME_STRESS, 2, 0)), null);
+  assert.equal(parseLiveStress(Uint8Array.of(105, 1, 0, 60)), null);
 });
 
 test('temperature and blood oxygen use their own realtime types', () => {

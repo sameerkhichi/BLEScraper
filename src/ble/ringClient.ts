@@ -30,6 +30,7 @@ import {
   RAW_SENSOR_ENABLE,
   REALTIME_HEART_RATE,
   REALTIME_SPO2,
+  REALTIME_STRESS,
   REALTIME_TEMPERATURE,
   SportDetailParser,
   UART_RX_UUID,
@@ -46,6 +47,7 @@ import {
   parseBattery,
   parseHeartRateCheck,
   parseLiveHeartRate,
+  parseLiveStress,
   parseToggle,
   gesturePacket,
   parseRawSensor,
@@ -392,6 +394,10 @@ export class RingClient {
     return this.run(() => this.collectRealtime(REALTIME_SPO2, isPlausibleSpo2, 30000));
   }
 
+  async measureStress(): Promise<number | null> {
+    return this.run(() => this.collectStress(30000));
+  }
+
   async measureBodyTemperature(): Promise<number | null> {
     return this.run(async () => {
       const raw = await this.collectRealtime(
@@ -718,6 +724,48 @@ export class RingClient {
     } finally {
       try {
         await this.send(stopRealtimePacket(readingType));
+      } catch {
+        // A reading is still usable when the stop command fails.
+      }
+    }
+
+    return readings.length === 0 ? null : readings[readings.length - 1];
+  }
+
+  private async collectStress(timeoutMs: number): Promise<number | null> {
+    const readings: number[] = [];
+    try {
+      await new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const timer = setTimeout(() => complete(), timeoutMs);
+        const complete = () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          this.listeners.delete(CMD_START_REAL_TIME);
+          this.aborts.delete(abort);
+          resolve();
+        };
+        const abort = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          this.listeners.delete(CMD_START_REAL_TIME);
+          this.aborts.delete(abort);
+          reject(error);
+        };
+        this.aborts.add(abort);
+        this.listeners.set(CMD_START_REAL_TIME, (packet) => {
+          const value = parseLiveStress(packet);
+          if (value === null) return;
+          readings.push(value);
+          if (readings.length >= 2) complete();
+        });
+        this.send(startRealtimePacket(REALTIME_STRESS)).catch(abort);
+      });
+    } finally {
+      try {
+        await this.send(stopRealtimePacket(REALTIME_STRESS));
       } catch {
         // A reading is still usable when the stop command fails.
       }

@@ -36,6 +36,7 @@ export const RAW_SENSOR_DISABLE = 0x05;
 export const REALTIME_HEART_RATE = 1;
 export const REALTIME_SPO2 = 3;
 export const REALTIME_HEART_RATE_STREAM = 6;
+export const REALTIME_STRESS = 0x08;
 export const REALTIME_TEMPERATURE = 0x0b;
 
 const ACTION_START = 1;
@@ -201,6 +202,21 @@ export function parseLiveHeartRate(packet: Uint8Array): number | null {
 
 export function isPlausibleHeartRate(value: number): boolean {
   return value >= 30 && value <= 220;
+}
+
+export function isPlausibleStress(value: number): boolean {
+  return value >= 1 && value <= 99;
+}
+
+// A settled stress value may sit in byte 3 beside a status, or in byte 2 on its own.
+// Bytes 1–3 with an empty value are status codes, not a score of 1, 2, or 3.
+export function parseLiveStress(packet: Uint8Array): number | null {
+  if (packet[0] !== CMD_START_REAL_TIME || packet[1] !== REALTIME_STRESS) return null;
+  const status = packet[2] ?? 0;
+  const value = packet[3] ?? 0;
+  if (isPlausibleStress(value)) return value;
+  if (status >= 4 && isPlausibleStress(status)) return status;
+  return null;
 }
 
 // Live heart-rate packets use byte 2 as a status. 1 with no BPM means the ring

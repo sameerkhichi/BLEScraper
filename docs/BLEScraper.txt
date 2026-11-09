@@ -22,7 +22,7 @@ Notes
 - Those switches are on the Settings screen. On the home screen, open the Arduino card and tap Settings. Apply to ring writes them immediately. The next download writes them again if the ring's answer does not match. An older ring that ignores HRV keeps the other three.
 - While the app is open, nothing cycles the sensor. The only automatic phone cycle is the download of data the ring already stored, about every 4 hours, or once when the app is opened and a download is already due. The Measure buttons run only when tapped. A download holds the radio for a short read, then disconnects, and the ring continues. iOS will not wake the app after it is swiped away.
 - The sleep score is estimated on the phone from the stages. The ring does not send one, and the score is not in the upload.
-- The stress score is estimated on the phone from still heart rate against the sleep pulse. The ring does not send one, and the score is not in the upload. The calculation is under Stress score.
+- The stress number is the ring's own 0–99 estimate. The phone does not invent one from heart rate. The bands and the day summary are under Stress score.
 - Will allow for HTTP/JSON communication with an API.
 - EAS Build will upload the ipa build to app store connect
 - App store connect will automatically add the app to testflight and will install on my phone
@@ -76,19 +76,17 @@ The score is half the duration part plus half the restorative part, minus the aw
 
 Stress score
 
-The Today card estimates a resting-load score from heart rate, steps, and sleep already stored on the phone. That number is not stored as its own field and is not sent in the JSON. Solloid can recompute it from those three logs. The ring's own stress and HRV samples, when the firmware returns them, are separate arrays named stress and hrv.
+The ring stores its own stress estimate, from 1 to 99, about every 30 minutes. Command 0x37 downloads that history. Command 0x36 turns the logging on and off with the other automatic checks. Measure stress asks for one live reading with command 0x69, sensor type 0x08, and the phone saves that sample with the time it was taken. Zero and anything over 99 are ignored. The raw samples are the stress array in the JSON. The averages, bands, and trend are not stored as their own fields.
 
-A heart-rate sample counts for today when three things are true. Its timestamp falls on the phone's local calendar day. It is outside every sleep window, from startedAt up to but not including endedAt. The 15-minute step block that contains it has fewer than 30 steps. A block starts at its timestamp and runs for 15 minutes. A sample with no block does not count. Walking and workouts drop out, so a high pulse from movement is not treated as stress.
+These bands are labels in the app. They are not a confirmed QRing scale, and a 50 here is not a 50 on another device. 0–24 is Relaxed. 25–49 is Low. 50–74 is Moderate. 75–99 is High.
 
-The baseline is the median BPM inside the most recent sleep window that has at least 6 heart-rate samples. Nights are tried from the latest startedAt backward. Samples during that night count even if the person got up. If no night has 6 samples, the baseline is the median of still samples from earlier local days, using the same stillness rule and leaving today out. If that fallback is also under 6 samples, the card says "Need last night's heart rate." and shows no score. An even count averages the two middle values, then the median is rounded to a whole BPM. That rounded number is what the score uses.
+A sample is daytime when it falls outside every sleep window, from startedAt up to but not including endedAt. The Today circle shows the latest daytime sample from the phone's local day, with that band under it. The line under the circles is today's daytime average and peak. With no daytime sample it says "No daytime stress yet."
 
-The day needs at least 6 still samples, which is 30 minutes at the ring's 5-minute heart-rate slots. When a baseline exists and today has fewer than that, the card says "Need 30 minutes still today." and shows no score.
+The Stress card, above Sleep, uses the same daytime samples. It draws them in time order, and shows the average, the peak, how long readings stayed at 75 or above, the share of samples in each band, and whether the last 3 hours are Rising, Falling, or Steady against the earlier part of today. That trend needs at least two samples on each side, and a gap of 5 points. High time counts each high sample as the gap until the next sample, capped at 60 minutes. The last sample of the day counts as 30 minutes.
 
-Each still sample scores how far it sits above that baseline. The excess is bpm minus baseline, and it cannot go below 0. The slot score is excess / 25 * 100, capped at 100. A sample at the baseline scores 0. A sample 25 bpm above it scores 100. The day score is the average of those slot scores, rounded.
+A 7-day average of earlier daytime samples appears once two earlier days exist. It says how many days it used when that is under 7. A 30-day average appears once 8 earlier days exist. The ring keeps about a week, so the longer average only fills in as the phone keeps older samples.
 
-0–24 is Resting. 25–49 is Mild. 50–74 is Elevated. 75–100 is High. The band is chosen after rounding.
-
-Under the circles, a scored day shows the average still BPM, the baseline, and the counted time. Counted time is 5 minutes per still sample. Caffeine, heat, illness, alcohol, and a pulse that stays high after exercise raise this score the same way.
+Overnight is the average of samples inside the latest sleep window. It is labeled Overnight and is not given a stress band. A higher overnight reading is kept apart from the daytime number.
 
 Body temperature
 

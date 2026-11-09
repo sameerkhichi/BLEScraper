@@ -88,106 +88,165 @@ function isSameLocalDay(timestamp: string, now: Date): boolean {
   );
 }
 
-const STEP_BLOCK_MS = 15 * 60 * 1000;
-const STILL_STEP_LIMIT = 30;
-const RESTING_MIN_SAMPLES = 6;
-const RESTING_SLOT_MINUTES = 5;
-// A slot 25 bpm above the sleep median fills the scale.
-const RESTING_FULL_EXCESS = 25;
+const STRESS_BANDS = ['Relaxed', 'Low', 'Moderate', 'High'] as const;
+const STRESS_HIGH = 75;
+const STRESS_TREND_MS = 3 * 60 * 60 * 1000;
+const STRESS_TREND_GAP = 5;
+const STRESS_HIGH_CAP_MS = 60 * 60 * 1000;
+const STRESS_LAST_SLOT_MS = 30 * 60 * 1000;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-export type RestingLoadBand = 'Resting' | 'Mild' | 'Elevated' | 'High';
+export type StressBand = (typeof STRESS_BANDS)[number];
+export type StressTrend = 'Rising' | 'Falling' | 'Steady';
 
-export type RestingLoad =
-  | {
-      status: 'scored';
-      score: number;
-      band: RestingLoadBand;
-      stillBpm: number;
-      baselineBpm: number;
-      stillMinutes: number;
-    }
-  | { status: 'need-still' }
-  | { status: 'need-baseline' };
+export type StressBaseline = {
+  value: number;
+  days: number;
+};
 
-// Daytime stress stand-in: still pulse against the sleep median. The ring stores
-// one BPM per slot, so this is resting load rather than heart-rate variability.
-export function restingLoad(
-  heartRate: HeartRateSample[],
-  steps: StepSample[],
-  sleep: SleepNight[],
-  now = new Date(),
-): RestingLoad {
-  const baseline = sleepBaseline(heartRate, steps, sleep, now);
-  if (baseline === null) return { status: 'need-baseline' };
+export type StressDistribution = Record<StressBand, number>;
 
-  const still = stillBpm(heartRate, steps, sleep, now, true);
-  if (still.length < RESTING_MIN_SAMPLES) return { status: 'need-still' };
+export type StressSummary = {
+  current: { value: number; band: StressBand; timestamp: string } | null;
+  today: MetricSample[];
+  average: number | null;
+  peak: number | null;
+  highMinutes: number;
+  distribution: StressDistribution;
+  trend: StressTrend | null;
+  week: StressBaseline | null;
+  month: StressBaseline | null;
+  overnight: number | null;
+};
 
-  const slots = still.map((bpm) => Math.min(100, (Math.max(0, bpm - baseline) / RESTING_FULL_EXCESS) * 100));
-  const score = Math.round(slots.reduce((sum, value) => sum + value, 0) / slots.length);
-  return {
-    status: 'scored',
-    score,
-    band: restingBand(score),
-    stillBpm: Math.round(still.reduce((sum, bpm) => sum + bpm, 0) / still.length),
-    baselineBpm: baseline,
-    stillMinutes: still.length * RESTING_SLOT_MINUTES,
-  };
-}
-
-function restingBand(score: number): RestingLoadBand {
-  if (score <= 24) return 'Resting';
-  if (score <= 49) return 'Mild';
-  if (score <= 74) return 'Elevated';
+// Labels for the ring's own 0–99 estimate. They are not the ring's categories.
+export function stressBand(value: number): StressBand {
+  if (value <= 24) return 'Relaxed';
+  if (value <= 49) return 'Low';
+  if (value <= 74) return 'Moderate';
   return 'High';
 }
 
-function sleepBaseline(
-  heartRate: HeartRateSample[],
-  steps: StepSample[],
-  sleep: SleepNight[],
-  now: Date,
-): number | null {
-  const nights = [...sleep].sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
-  for (const night of nights) {
-    const start = Date.parse(night.startedAt);
-    const end = Date.parse(night.endedAt);
-    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
-    const bpm = heartRateBpm(heartRate, (time) => time >= start && time < end);
-    if (bpm.length >= RESTING_MIN_SAMPLES) return roundedMedian(bpm);
+// Daytime samples are the ones outside every sleep window. Overnight stays separate.
+export function stressSummary(samples: MetricSample[], sleep: SleepNight[], now = new Date()): StressSummary {
+  const usable = samples
+    .filter((sample) => {
+      const time = Date.parse(sample.timestamp);
+      return Number.isFinite(time) && sample.value >= 1 && sample.value <= 99;
+    })
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  const today = usable.filter(
+    (sample) => isSameLocalDay(sample.timestamp, now) && !insideSleep(sleep, Date.parse(sample.timestamp)),
+  );
+  const current = today.at(-1) ?? null;
+  const values = today.map((sample) => sample.value);
+
+  return {
+    current: current ? { value: current.value, band: stressBand(current.value), timestamp: current.timestamp } : null,
+    today,
+    average: values.length === 0 ? null : Math.round(mean(values)),
+    peak: values.length === 0 ? null : Math.max(...values),
+    highMinutes: highMinutes(today),
+    distribution: distribution(today),
+    trend: stressTrend(today, now),
+    week: stressBaseline(usable, sleep, now, 7, 2),
+    month: stressBaseline(usable, sleep, now, 30, 8),
+    overnight: overnightAverage(usable, sleep),
+  };
+}
+
+function distribution(today: MetricSample[]): StressDistribution {
+  const counts = STRESS_BANDS.map((band) => today.filter((sample) => stressBand(sample.value) === band).length);
+  const shares = largestRemainder(counts);
+  return { Relaxed: shares[0], Low: shares[1], Moderate: shares[2], High: shares[3] };
+}
+
+function largestRemainder(counts: number[]): number[] {
+  const total = counts.reduce((sum, count) => sum + count, 0);
+  if (total === 0) return counts.map(() => 0);
+  const exact = counts.map((count) => (count / total) * 100);
+  const floors = exact.map((value) => Math.floor(value));
+  let leftover = 100 - floors.reduce((sum, value) => sum + value, 0);
+  const order = exact
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((left, right) => right.fraction - left.fraction || left.index - right.index);
+  for (const item of order) {
+    if (leftover <= 0) break;
+    floors[item.index] += 1;
+    leftover -= 1;
   }
-
-  const earlier = stillBpm(heartRate, steps, sleep, now, false);
-  if (earlier.length < RESTING_MIN_SAMPLES) return null;
-  return roundedMedian(earlier);
+  return floors;
 }
 
-function stillBpm(
-  heartRate: HeartRateSample[],
-  steps: StepSample[],
-  sleep: SleepNight[],
-  now: Date,
-  today: boolean,
-): number[] {
-  return heartRateBpm(heartRate, (time, timestamp) => {
-    if (isSameLocalDay(timestamp, now) !== today) return false;
-    if (insideSleep(sleep, time)) return false;
-    return isStill(steps, time);
-  });
-}
-
-function heartRateBpm(
-  heartRate: HeartRateSample[],
-  include: (time: number, timestamp: string) => boolean,
-): number[] {
-  const bpm: number[] = [];
-  for (const sample of heartRate) {
+function stressTrend(today: MetricSample[], now: Date): StressTrend | null {
+  const cutoff = now.getTime() - STRESS_TREND_MS;
+  const recent: number[] = [];
+  const earlier: number[] = [];
+  for (const sample of today) {
     const time = Date.parse(sample.timestamp);
-    if (!Number.isFinite(time) || !Number.isFinite(sample.bpm) || sample.bpm <= 0) continue;
-    if (!include(time, sample.timestamp)) continue;
-    bpm.push(sample.bpm);
+    if (time >= cutoff) recent.push(sample.value);
+    else earlier.push(sample.value);
   }
-  return bpm;
+  if (recent.length < 2 || earlier.length < 2) return null;
+  const gap = mean(recent) - mean(earlier);
+  if (gap >= STRESS_TREND_GAP) return 'Rising';
+  if (gap <= -STRESS_TREND_GAP) return 'Falling';
+  return 'Steady';
+}
+
+function stressBaseline(
+  samples: MetricSample[],
+  sleep: SleepNight[],
+  now: Date,
+  windowDays: number,
+  minimumDays: number,
+): StressBaseline | null {
+  const today = localDayNumber(now);
+  if (today === null) return null;
+  const picked: number[] = [];
+  const days = new Set<number>();
+  for (const sample of samples) {
+    const day = localDayNumber(new Date(sample.timestamp));
+    if (day === null) continue;
+    const ago = (today - day) / DAY_MS;
+    if (ago < 1 || ago > windowDays) continue;
+    if (insideSleep(sleep, Date.parse(sample.timestamp))) continue;
+    picked.push(sample.value);
+    days.add(day);
+  }
+  if (days.size < minimumDays) return null;
+  return { value: Math.round(mean(picked)), days: days.size };
+}
+
+function overnightAverage(samples: MetricSample[], sleep: SleepNight[]): number | null {
+  const night = [...sleep]
+    .filter((item) => Number.isFinite(Date.parse(item.startedAt)) && Number.isFinite(Date.parse(item.endedAt)))
+    .sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt))[0];
+  if (!night) return null;
+  const start = Date.parse(night.startedAt);
+  const end = Date.parse(night.endedAt);
+  const values = samples
+    .filter((sample) => {
+      const time = Date.parse(sample.timestamp);
+      return time >= start && time < end;
+    })
+    .map((sample) => sample.value);
+  if (values.length === 0) return null;
+  return Math.round(mean(values));
+}
+
+function highMinutes(today: MetricSample[]): number {
+  let total = 0;
+  for (let index = 0; index < today.length; index += 1) {
+    if (today[index].value < STRESS_HIGH) continue;
+    if (index === today.length - 1) {
+      total += STRESS_LAST_SLOT_MS;
+      continue;
+    }
+    const gap = Date.parse(today[index + 1].timestamp) - Date.parse(today[index].timestamp);
+    total += Math.min(Math.max(gap, 0), STRESS_HIGH_CAP_MS);
+  }
+  return Math.round(total / 60000);
 }
 
 function insideSleep(sleep: SleepNight[], time: number): boolean {
@@ -198,24 +257,13 @@ function insideSleep(sleep: SleepNight[], time: number): boolean {
   });
 }
 
-function isStill(steps: StepSample[], time: number): boolean {
-  let stepsInBlock: number | null = null;
-  let blockStart = -Infinity;
-  for (const sample of steps) {
-    const start = Date.parse(sample.timestamp);
-    if (!Number.isFinite(start) || time < start || time >= start + STEP_BLOCK_MS) continue;
-    if (start < blockStart) continue;
-    blockStart = start;
-    stepsInBlock = sample.steps;
-  }
-  return stepsInBlock !== null && stepsInBlock < STILL_STEP_LIMIT;
+function localDayNumber(date: Date): number | null {
+  if (Number.isNaN(date.getTime())) return null;
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
 }
 
-function roundedMedian(values: number[]): number {
-  const sorted = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(sorted.length / 2);
-  const median = sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
-  return Math.round(median);
+function mean(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
 }
 
 export type AccelReading = {
@@ -416,8 +464,8 @@ export function mergeReadings(
     accelerometer: next.accelerometer ?? previous.accelerometer,
     heartRate: keepHistory ? previous.heartRate : next.heartRate,
     steps: keepHistory ? previous.steps : next.steps,
-    stress: keepHistory ? (previous.stress ?? []) : (next.stress ?? []),
-    hrv: keepHistory ? (previous.hrv ?? []) : (next.hrv ?? []),
+    stress: keepHistory ? unionByTimestamp(previous.stress ?? [], next.stress ?? []) : (next.stress ?? []),
+    hrv: keepHistory ? unionByTimestamp(previous.hrv ?? [], next.hrv ?? []) : (next.hrv ?? []),
     sleep: keepHistory ? previous.sleep : next.sleep,
   };
 }

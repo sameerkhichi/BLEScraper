@@ -40,6 +40,7 @@ type AppContextValue = {
   scan: (kind: ScanKind) => Promise<void>;
   recordMotion: (sample: AccelSample) => Promise<void>;
   recordHeartRate: (bpm: number) => Promise<void>;
+  recordStress: (value: number) => Promise<void>;
   withRing: <T>(action: () => Promise<T>) => Promise<T>;
   sendPending: () => Promise<void>;
   removePending: (id: string) => Promise<void>;
@@ -409,6 +410,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     });
   }, [publishQueue, remember, sendQueue]);
 
+  const recordStress = useCallback(async (value: number) => {
+    await runWithQueue(async () => {
+      const stored = await loadSettings();
+      if (!stored.ringId) {
+        setStatus('Choose the ring first.');
+        return;
+      }
+      const previous = await loadLastPayload();
+      const storedQueue = await loadQueue();
+      const payload = readingPayload(stored.ringId, stored.ringName, {
+        stress: [{ timestamp: new Date().toISOString(), value }],
+      });
+      await remember(mergeReadings(previous, payload, true));
+      const nextQueue = enqueue(storedQueue, payload);
+      await publishQueue(nextQueue);
+      await sendQueue(nextQueue, stored);
+    });
+  }, [publishQueue, remember, sendQueue]);
+
   const sendPending = useCallback(async () => {
     await runWithRing(async () => {
       try {
@@ -487,6 +507,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       scan,
       recordMotion,
       recordHeartRate,
+      recordStress,
       withRing,
       sendPending,
       removePending,
@@ -507,6 +528,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       scan,
       recordMotion,
       recordHeartRate,
+      recordStress,
       withRing,
       sendPending,
       removePending,

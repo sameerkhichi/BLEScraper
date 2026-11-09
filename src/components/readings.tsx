@@ -3,12 +3,13 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import {
   activityForLocalDay,
-  restingLoad,
-  type HeartRateSample,
-  type RestingLoad,
+  stressBand,
+  stressSummary,
+  type MetricSample,
   type SleepNight,
   type SleepStageName,
   type StepSample,
+  type StressSummary,
 } from '../model';
 import {
   FEVER_C,
@@ -109,15 +110,15 @@ export function sleepQuality(night: SleepNight): { score: number; label: string 
 
 export function ActivityChart({
   steps,
-  heartRate = [],
+  stress = [],
   sleep = [],
 }: {
   steps: StepSample[];
-  heartRate?: HeartRateSample[];
+  stress?: MetricSample[];
   sleep?: SleepNight[];
 }) {
   const today = activityForLocalDay(steps);
-  const load = restingLoad(heartRate, steps, sleep);
+  const summary = stressSummary(stress, sleep);
   const night = latestNight(sleep);
   const quality = night ? sleepQuality(night) : null;
 
@@ -135,10 +136,10 @@ export function ActivityChart({
       </View>
       <View style={styles.activityRow}>
         <ActivityStat
-          caption={load.status === 'scored' ? load.band : '—'}
+          caption={summary.current ? summary.current.band : '—'}
           icon="💓"
           label="Stress"
-          value={load.status === 'scored' ? `${load.score}` : '—'}
+          value={summary.current ? `${summary.current.value}` : '—'}
         />
         <ActivityStat
           caption={quality ? quality.label : '—'}
@@ -147,7 +148,7 @@ export function ActivityChart({
           value={quality ? `${quality.score}` : '—'}
         />
       </View>
-      <Text style={[styles.meta, styles.stressLine]}>{stressContext(load)}</Text>
+      <Text style={[styles.meta, styles.stressLine]}>{stressContext(summary)}</Text>
     </View>
   );
 }
@@ -177,10 +178,76 @@ function ActivityStat({
   );
 }
 
-function stressContext(load: RestingLoad): string {
-  if (load.status === 'need-still') return 'Need 30 minutes still today.';
-  if (load.status === 'need-baseline') return "Need last night's heart rate.";
-  return `Still ${load.stillBpm} bpm · sleep ${load.baselineBpm} · ${formatDuration(load.stillMinutes)}`;
+function stressContext(summary: StressSummary): string {
+  if (summary.average === null || summary.peak === null) return 'No daytime stress yet.';
+  return `Today ${summary.average} · peak ${summary.peak}`;
+}
+
+const STRESS_TICKS = [100, 75, 50, 25, 0];
+
+export function StressPanel({ summary, live }: { summary: StressSummary; live: number | null }) {
+  const value = live ?? summary.current?.value ?? null;
+  const band = live !== null ? stressBand(live) : (summary.current?.band ?? null);
+  const points = summary.today.map((sample) => sample.value);
+  const baselines = baselineLine(summary);
+
+  return (
+    <View style={styles.block}>
+      <View style={styles.heartReadout}>
+        <View>
+          <Text style={styles.vitalValue}>{value === null ? '—' : `${value}`}</Text>
+          <Text style={styles.meta}>{band ?? '0–99'}</Text>
+        </View>
+      </View>
+      {points.length === 0 ? (
+        <Text style={styles.meta}>No daytime stress yet.</Text>
+      ) : (
+        <SeriesLine max={100} min={0} points={points} ticks={STRESS_TICKS} />
+      )}
+      <View style={styles.summaryRow}>
+        <View style={styles.summaryStat}>
+          <Text style={styles.summaryValue}>{summary.average ?? '—'}</Text>
+          <Text style={styles.meta}>Today</Text>
+        </View>
+        <View style={styles.summaryStat}>
+          <Text style={styles.summaryValue}>{summary.peak ?? '—'}</Text>
+          <Text style={styles.meta}>Peak</Text>
+        </View>
+        <View style={styles.summaryStat}>
+          <Text style={styles.summaryValue}>{summary.today.length === 0 ? '—' : formatDuration(summary.highMinutes)}</Text>
+          <Text style={styles.meta}>High</Text>
+        </View>
+        <View style={styles.summaryStat}>
+          <Text adjustsFontSizeToFit numberOfLines={1} style={styles.summaryValue}>
+            {summary.trend ?? '—'}
+          </Text>
+          <Text style={styles.meta}>Trend</Text>
+        </View>
+      </View>
+      {summary.today.length === 0 ? null : (
+        <Text style={styles.meta}>
+          {`Relaxed ${summary.distribution.Relaxed}% · Low ${summary.distribution.Low}% · Moderate ${summary.distribution.Moderate}% · High ${summary.distribution.High}%`}
+        </Text>
+      )}
+      {baselines ? <Text style={styles.meta}>{baselines}</Text> : null}
+      <Text style={styles.meta}>
+        {summary.overnight === null ? 'No overnight reading.' : `Overnight ${summary.overnight}`}
+      </Text>
+    </View>
+  );
+}
+
+function baselineLine(summary: StressSummary): string | null {
+  const parts: string[] = [];
+  if (summary.week) {
+    const label = summary.week.days >= 7 ? '7-day' : `${summary.week.days}-day`;
+    parts.push(`${label} ${summary.week.value}`);
+  }
+  if (summary.month) {
+    const label = summary.month.days >= 30 ? '30-day' : `${summary.month.days}-day`;
+    parts.push(`${label} ${summary.month.value}`);
+  }
+  return parts.length === 0 ? null : parts.join(' · ');
 }
 
 export function HeartRateChart({
@@ -204,7 +271,7 @@ export function HeartRateChart({
       {points.length === 0 ? (
         <Text style={styles.meta}>{live ? 'Measuring. The first beat takes a few seconds.' : 'Measure to draw your heart rate.'}</Text>
       ) : (
-        <BpmLine points={points} />
+        <SeriesLine max={SCALE_MAX} min={SCALE_MIN} points={points} ticks={SCALE_TICKS} />
       )}
     </View>
   );
@@ -256,28 +323,38 @@ function PulsingHeart({ bpm }: { bpm: number | null }) {
   return <Animated.Text style={[styles.heartGlyph, { transform: [{ scale }] }]}>❤️</Animated.Text>;
 }
 
-function BpmLine({ points }: { points: number[] }) {
+function SeriesLine({
+  points,
+  min,
+  max,
+  ticks,
+}: {
+  points: number[];
+  min: number;
+  max: number;
+  ticks: number[];
+}) {
   const [plotWidth, setPlotWidth] = useState(0);
   const capacity = Math.max(1, Math.floor(plotWidth / BEAT_SLOT));
   const visible = plotWidth === 0 ? [] : points.slice(-capacity);
-  const yFor = (bpm: number) => {
-    const clamped = Math.max(SCALE_MIN, Math.min(SCALE_MAX, bpm));
+  const yFor = (value: number) => {
+    const clamped = Math.max(min, Math.min(max, value));
     const inset = 8;
-    return inset + ((SCALE_MAX - clamped) / (SCALE_MAX - SCALE_MIN)) * (CHART_HEIGHT - inset * 2);
+    return inset + ((max - clamped) / (max - min)) * (CHART_HEIGHT - inset * 2);
   };
-  const coords = visible.map((bpm, index) => ({ x: index * BEAT_SLOT + BEAT_SLOT / 2, y: yFor(bpm) }));
+  const coords = visible.map((value, index) => ({ x: index * BEAT_SLOT + BEAT_SLOT / 2, y: yFor(value) }));
 
   return (
     <View style={styles.bpmScaleRow}>
       <View style={styles.bpmAxis}>
-        {SCALE_TICKS.map((tick) => (
+        {ticks.map((tick) => (
           <Text key={tick} style={[styles.bpmTick, { top: yFor(tick) - 7 }]}>
             {tick}
           </Text>
         ))}
       </View>
       <View style={styles.bpmPlot} onLayout={(event) => setPlotWidth(event.nativeEvent.layout.width)}>
-        {SCALE_TICKS.map((tick) => (
+        {ticks.map((tick) => (
           <View key={tick} style={[styles.bpmGrid, { top: yFor(tick) }]} />
         ))}
         {coords.slice(1).map((point, index) => {
