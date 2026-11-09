@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import {
@@ -16,7 +16,11 @@ const COLD = '#6ea8ff';
 const WARN = '#f0c36a';
 const TEMP_MIN = 35;
 const TEMP_MAX = 40;
-const CHART_HEIGHT = 112;
+const CHART_HEIGHT = 148;
+const SCALE_MIN = 40;
+const SCALE_MAX = 200;
+const SCALE_TICKS = [200, 160, 120, 80, 40];
+const BEAT_SLOT = 18;
 
 const stageColor: Record<SleepStageName, string> = {
   light: '#7fbf8a',
@@ -237,22 +241,66 @@ function PulsingHeart({ bpm }: { bpm: number | null }) {
 }
 
 function BpmLine({ points }: { points: number[] }) {
-  const low = Math.min(...points);
-  const high = Math.max(...points);
-  const floor = low === high ? low - 12 : low;
-  const span = Math.max(12, (low === high ? high + 12 : high) - floor);
+  const [plotWidth, setPlotWidth] = useState(0);
+  const capacity = Math.max(1, Math.floor(plotWidth / BEAT_SLOT));
+  const visible = plotWidth === 0 ? [] : points.slice(-capacity);
+  const yFor = (bpm: number) => {
+    const clamped = Math.max(SCALE_MIN, Math.min(SCALE_MAX, bpm));
+    const inset = 8;
+    return inset + ((SCALE_MAX - clamped) / (SCALE_MAX - SCALE_MIN)) * (CHART_HEIGHT - inset * 2);
+  };
+  const coords = visible.map((bpm, index) => ({ x: index * BEAT_SLOT + BEAT_SLOT / 2, y: yFor(bpm) }));
 
   return (
-    <View style={styles.bpmChart}>
-      {points.map((bpm, index) => {
-        const latest = index === points.length - 1;
-        const height = 8 + ((bpm - floor) / span) * (CHART_HEIGHT - 16);
-        return (
-          <View key={`${index}-${bpm}`} style={styles.bpmColumn}>
-            <View style={[styles.bpmBar, latest && styles.bpmBarLatest, { height }]} />
-          </View>
-        );
-      })}
+    <View style={styles.bpmScaleRow}>
+      <View style={styles.bpmAxis}>
+        {SCALE_TICKS.map((tick) => (
+          <Text key={tick} style={[styles.bpmTick, { top: yFor(tick) - 7 }]}>
+            {tick}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.bpmPlot} onLayout={(event) => setPlotWidth(event.nativeEvent.layout.width)}>
+        {SCALE_TICKS.map((tick) => (
+          <View key={tick} style={[styles.bpmGrid, { top: yFor(tick) }]} />
+        ))}
+        {coords.slice(1).map((point, index) => {
+          const previous = coords[index];
+          if (!previous) return null;
+          const dx = point.x - previous.x;
+          const dy = point.y - previous.y;
+          const length = Math.hypot(dx, dy);
+          const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+          return (
+            <View
+              key={`line-${index}`}
+              style={[
+                styles.bpmSegment,
+                {
+                  left: (previous.x + point.x) / 2 - length / 2,
+                  top: (previous.y + point.y) / 2 - 1,
+                  width: length,
+                  transform: [{ rotate: `${angle}deg` }],
+                },
+              ]}
+            />
+          );
+        })}
+        {coords.map((point, index) => {
+          const latest = index === coords.length - 1;
+          const size = latest ? 12 : 8;
+          return (
+            <View
+              key={`node-${index}`}
+              style={[
+                styles.bpmNode,
+                latest && styles.bpmNodeLatest,
+                { height: size, left: point.x - size / 2, top: point.y - size / 2, width: size },
+              ]}
+            />
+          );
+        })}
+      </View>
     </View>
   );
 }
@@ -519,24 +567,48 @@ const styles = StyleSheet.create({
     fontSize: 36,
     lineHeight: 42,
   },
-  bpmChart: {
-    alignItems: 'flex-end',
+  bpmScaleRow: {
     flexDirection: 'row',
-    gap: 3,
+    gap: 8,
+  },
+  bpmAxis: {
+    height: CHART_HEIGHT,
+    width: 32,
+  },
+  bpmTick: {
+    color: colors.muted,
+    fontSize: 11,
+    position: 'absolute',
+    right: 0,
+    textAlign: 'right',
+    width: 32,
+  },
+  bpmPlot: {
+    flex: 1,
     height: CHART_HEIGHT,
   },
-  bpmColumn: {
-    flex: 1,
-    height: '100%',
-    justifyContent: 'flex-end',
+  bpmGrid: {
+    backgroundColor: colors.line,
+    height: 1,
+    left: 0,
+    position: 'absolute',
+    right: 0,
   },
-  bpmBar: {
-    backgroundColor: 'rgba(255,42,42,0.45)',
-    borderRadius: 3,
-    minHeight: 6,
-  },
-  bpmBarLatest: {
+  bpmSegment: {
     backgroundColor: colors.accent,
+    height: 2,
+    position: 'absolute',
+  },
+  bpmNode: {
+    backgroundColor: colors.bg,
+    borderColor: colors.accent,
+    borderRadius: 99,
+    borderWidth: 2,
+    position: 'absolute',
+  },
+  bpmNodeLatest: {
+    backgroundColor: colors.accent,
+    borderColor: colors.text,
   },
   meter: {
     height: 22,

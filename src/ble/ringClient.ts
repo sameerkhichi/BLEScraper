@@ -56,6 +56,7 @@ import {
   readStepsPacket,
   readTogglePacket,
   setTimePacket,
+  smoothHeartRate,
   startHeartRatePacket,
   startRealtimePacket,
   stopRealtimePacket,
@@ -76,6 +77,9 @@ const SHORT_TIMEOUT_MS = 5000;
 const HEART_RATE_TIMEOUT_MS = 35000;
 // Long enough to see an off-finger packet. The heart-rate measurement waits on its own.
 const WEAR_PROBE_MS = 8000;
+// A fresh start is a rough number. One measurement stays open until it returns a beat.
+const LIVE_HEART_WINDOW = 5;
+const LIVE_HEART_QUIET_MS = 2500;
 
 export const NOT_WORN_MESSAGE = 'Ring is not being worn. Leaving it asleep.';
 
@@ -425,17 +429,20 @@ export class RingClient {
 
   async watchHeartRate(onFrame: (frame: HeartRateFrame) => void): Promise<void> {
     return this.run(async () => {
-      let restart: ReturnType<typeof setTimeout> | null = null;
-      const clearRestart = () => {
-        if (!restart) return;
-        clearTimeout(restart);
-        restart = null;
+      let quiet: ReturnType<typeof setTimeout> | null = null;
+      const clearQuiet = () => {
+        if (!quiet) return;
+        clearTimeout(quiet);
+        quiet = null;
       };
       try {
         await new Promise<void>((resolve, reject) => {
           let settled = false;
           let offTimer: ReturnType<typeof setTimeout> | null = null;
           let sawBpm = false;
+          // True from the moment a start is sent until that measurement returns a beat.
+          let measuring = true;
+          const recent: number[] = [];
           const clearOff = () => {
             if (!offTimer) return;
             clearTimeout(offTimer);
@@ -444,7 +451,7 @@ export class RingClient {
           const finish = () => {
             if (settled) return;
             settled = true;
-            clearRestart();
+            clearQuiet();
             clearOff();
             this.heartStop = null;
             this.listeners.delete(CMD_START_REAL_TIME);
@@ -454,23 +461,24 @@ export class RingClient {
           const abort = (error: Error) => {
             if (settled) return;
             settled = true;
-            clearRestart();
+            clearQuiet();
             clearOff();
             this.heartStop = null;
             this.listeners.delete(CMD_START_REAL_TIME);
             this.aborts.delete(abort);
             reject(error);
           };
-          // Another start while the light is still measuring wipes the beat. Wait until the packets stop.
-          const askAgain = () => {
-            clearRestart();
-            if (settled) return;
-            restart = setTimeout(() => {
-              restart = null;
-              if (settled) return;
+          // One start at a time. Another request before the beat comes back clears the sensor and nothing arrives.
+          const scheduleNext = () => {
+            clearQuiet();
+            if (settled || measuring) return;
+            quiet = setTimeout(() => {
+              quiet = null;
+              if (settled || measuring) return;
+              measuring = true;
               debugLog('Asking for the next heart-rate sample');
               this.send(startHeartRatePacket()).catch(() => undefined);
-            }, 2500);
+            }, LIVE_HEART_QUIET_MS);
           };
           this.aborts.add(abort);
           this.heartStop = finish;
@@ -479,9 +487,13 @@ export class RingClient {
             if (bpm !== null) {
               clearOff();
               sawBpm = true;
+              measuring = false;
+              recent.push(bpm);
+              if (recent.length > LIVE_HEART_WINDOW) recent.shift();
+              const steady = smoothHeartRate(recent) ?? bpm;
               debugLog(`Heart rate ${bpm}`);
-              onFrame({ kind: 'bpm', bpm });
-              askAgain();
+              onFrame({ kind: 'bpm', bpm: steady });
+              scheduleNext();
               return;
             }
             debugLog(`Heart-rate packet ${toHex(packet)}`);
@@ -497,7 +509,7 @@ export class RingClient {
           this.send(start).catch(abort);
         });
       } finally {
-        clearRestart();
+        clearQuiet();
         try {
           await this.send(stopRealtimePacket(REALTIME_HEART_RATE));
         } catch {
