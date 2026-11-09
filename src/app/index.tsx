@@ -169,7 +169,11 @@ export default function HomeScreen() {
         style={styles.screen}
       >
         <Card>
-          <ActivityChart steps={lastPayload?.steps ?? []} />
+          <ActivityChart
+            heartRate={lastPayload?.heartRate ?? []}
+            sleep={lastPayload?.sleep ?? []}
+            steps={lastPayload?.steps ?? []}
+          />
           <TakenLine timestamp={latestToday(lastPayload?.steps ?? [])} />
         </Card>
 

@@ -18,6 +18,7 @@ Notes
 - The app will hold pending uploads of data until connections is re-established.
 - Sleep is saved on the phone when a wake downloads it and while the app is open. The ring can be on the table. Heart rate and steps already saved stay put.
 - The sleep score is estimated on the phone from the stages. The ring does not send one, and the score is not in the upload.
+- The stress score is estimated on the phone from still heart rate against the sleep pulse. The ring does not send one, and the score is not in the upload. The calculation is under Stress score.
 - Will allow for HTTP/JSON communication with an API.
 - EAS Build will upload the ipa build to app store connect
 - App store connect will automatically add the app to testflight and will install on my phone
@@ -53,6 +54,22 @@ Restorative sleep. This is the percent of minutesAsleep that was deep or REM. Li
 Awake penalty. Each awakening costs 8 points, and each minute awake costs one third of a point. The penalty stops at 40.
 
 The score is half the duration part plus half the restorative part, minus the awake penalty. 85 or more is Excellent. 70 or more is Good. 50 or more is Fair. Anything lower is Poor.
+
+Stress score
+
+The ring does not report stress or the gaps between beats. The Today card estimates a resting-load score from heart rate, steps, and sleep already stored on the phone. That number is not stored as its own field and is not sent in the JSON. Solloid can recompute it from those three logs.
+
+A heart-rate sample counts for today when three things are true. Its timestamp falls on the phone's local calendar day. It is outside every sleep window, from startedAt up to but not including endedAt. The 15-minute step block that contains it has fewer than 30 steps. A block starts at its timestamp and runs for 15 minutes. A sample with no block does not count. Walking and workouts drop out, so a high pulse from movement is not treated as stress.
+
+The baseline is the median BPM inside the most recent sleep window that has at least 6 heart-rate samples. Nights are tried from the latest startedAt backward. Samples during that night count even if the person got up. If no night has 6 samples, the baseline is the median of still samples from earlier local days, using the same stillness rule and leaving today out. If that fallback is also under 6 samples, the card says "Need last night's heart rate." and shows no score. An even count averages the two middle values, then the median is rounded to a whole BPM. That rounded number is what the score uses.
+
+The day needs at least 6 still samples, which is 30 minutes at the ring's 5-minute heart-rate slots. When a baseline exists and today has fewer than that, the card says "Need 30 minutes still today." and shows no score.
+
+Each still sample scores how far it sits above that baseline. The excess is bpm minus baseline, and it cannot go below 0. The slot score is excess / 25 * 100, capped at 100. A sample at the baseline scores 0. A sample 25 bpm above it scores 100. The day score is the average of those slot scores, rounded.
+
+0–24 is Resting. 25–49 is Mild. 50–74 is Elevated. 75–100 is High. The band is chosen after rounding.
+
+Under the circles, a scored day shows the average still BPM, the baseline, and the counted time. Counted time is 5 minutes per still sample. Caffeine, heat, illness, alcohol, and a pulse that stays high after exercise raise this score the same way.
 
 Ring storage
 

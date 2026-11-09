@@ -62,6 +62,136 @@ function isSameLocalDay(timestamp: string, now: Date): boolean {
   );
 }
 
+const STEP_BLOCK_MS = 15 * 60 * 1000;
+const STILL_STEP_LIMIT = 30;
+const RESTING_MIN_SAMPLES = 6;
+const RESTING_SLOT_MINUTES = 5;
+// A slot 25 bpm above the sleep median fills the scale.
+const RESTING_FULL_EXCESS = 25;
+
+export type RestingLoadBand = 'Resting' | 'Mild' | 'Elevated' | 'High';
+
+export type RestingLoad =
+  | {
+      status: 'scored';
+      score: number;
+      band: RestingLoadBand;
+      stillBpm: number;
+      baselineBpm: number;
+      stillMinutes: number;
+    }
+  | { status: 'need-still' }
+  | { status: 'need-baseline' };
+
+// Daytime stress stand-in: still pulse against the sleep median. The ring stores
+// one BPM per slot, so this is resting load rather than heart-rate variability.
+export function restingLoad(
+  heartRate: HeartRateSample[],
+  steps: StepSample[],
+  sleep: SleepNight[],
+  now = new Date(),
+): RestingLoad {
+  const baseline = sleepBaseline(heartRate, steps, sleep, now);
+  if (baseline === null) return { status: 'need-baseline' };
+
+  const still = stillBpm(heartRate, steps, sleep, now, true);
+  if (still.length < RESTING_MIN_SAMPLES) return { status: 'need-still' };
+
+  const slots = still.map((bpm) => Math.min(100, (Math.max(0, bpm - baseline) / RESTING_FULL_EXCESS) * 100));
+  const score = Math.round(slots.reduce((sum, value) => sum + value, 0) / slots.length);
+  return {
+    status: 'scored',
+    score,
+    band: restingBand(score),
+    stillBpm: Math.round(still.reduce((sum, bpm) => sum + bpm, 0) / still.length),
+    baselineBpm: baseline,
+    stillMinutes: still.length * RESTING_SLOT_MINUTES,
+  };
+}
+
+function restingBand(score: number): RestingLoadBand {
+  if (score <= 24) return 'Resting';
+  if (score <= 49) return 'Mild';
+  if (score <= 74) return 'Elevated';
+  return 'High';
+}
+
+function sleepBaseline(
+  heartRate: HeartRateSample[],
+  steps: StepSample[],
+  sleep: SleepNight[],
+  now: Date,
+): number | null {
+  const nights = [...sleep].sort((left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt));
+  for (const night of nights) {
+    const start = Date.parse(night.startedAt);
+    const end = Date.parse(night.endedAt);
+    if (!Number.isFinite(start) || !Number.isFinite(end)) continue;
+    const bpm = heartRateBpm(heartRate, (time) => time >= start && time < end);
+    if (bpm.length >= RESTING_MIN_SAMPLES) return roundedMedian(bpm);
+  }
+
+  const earlier = stillBpm(heartRate, steps, sleep, now, false);
+  if (earlier.length < RESTING_MIN_SAMPLES) return null;
+  return roundedMedian(earlier);
+}
+
+function stillBpm(
+  heartRate: HeartRateSample[],
+  steps: StepSample[],
+  sleep: SleepNight[],
+  now: Date,
+  today: boolean,
+): number[] {
+  return heartRateBpm(heartRate, (time, timestamp) => {
+    if (isSameLocalDay(timestamp, now) !== today) return false;
+    if (insideSleep(sleep, time)) return false;
+    return isStill(steps, time);
+  });
+}
+
+function heartRateBpm(
+  heartRate: HeartRateSample[],
+  include: (time: number, timestamp: string) => boolean,
+): number[] {
+  const bpm: number[] = [];
+  for (const sample of heartRate) {
+    const time = Date.parse(sample.timestamp);
+    if (!Number.isFinite(time) || !Number.isFinite(sample.bpm) || sample.bpm <= 0) continue;
+    if (!include(time, sample.timestamp)) continue;
+    bpm.push(sample.bpm);
+  }
+  return bpm;
+}
+
+function insideSleep(sleep: SleepNight[], time: number): boolean {
+  return sleep.some((night) => {
+    const start = Date.parse(night.startedAt);
+    const end = Date.parse(night.endedAt);
+    return Number.isFinite(start) && Number.isFinite(end) && time >= start && time < end;
+  });
+}
+
+function isStill(steps: StepSample[], time: number): boolean {
+  let stepsInBlock: number | null = null;
+  let blockStart = -Infinity;
+  for (const sample of steps) {
+    const start = Date.parse(sample.timestamp);
+    if (!Number.isFinite(start) || time < start || time >= start + STEP_BLOCK_MS) continue;
+    if (start < blockStart) continue;
+    blockStart = start;
+    stepsInBlock = sample.steps;
+  }
+  return stepsInBlock !== null && stepsInBlock < STILL_STEP_LIMIT;
+}
+
+function roundedMedian(values: number[]): number {
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+  return Math.round(median);
+}
+
 export type AccelReading = {
   x: number;
   y: number;

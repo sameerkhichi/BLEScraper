@@ -1,7 +1,15 @@
 import { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
-import { activityForLocalDay, type SleepNight, type SleepStageName, type StepSample } from '../model';
+import {
+  activityForLocalDay,
+  restingLoad,
+  type HeartRateSample,
+  type RestingLoad,
+  type SleepNight,
+  type SleepStageName,
+  type StepSample,
+} from '../model';
 import { colors } from './ui';
 
 const COLD = '#6ea8ff';
@@ -79,36 +87,80 @@ export function sleepQuality(night: SleepNight): { score: number; label: string 
   return { score, label };
 }
 
-export function ActivityChart({ steps }: { steps: StepSample[] }) {
+export function ActivityChart({
+  steps,
+  heartRate = [],
+  sleep = [],
+}: {
+  steps: StepSample[];
+  heartRate?: HeartRateSample[];
+  sleep?: SleepNight[];
+}) {
   const today = activityForLocalDay(steps);
+  const load = restingLoad(heartRate, steps, sleep);
+  const night = latestNight(sleep);
+  const quality = night ? sleepQuality(night) : null;
 
   return (
     <View style={styles.block}>
       <Text style={styles.label}>Today</Text>
       <View style={styles.activityRow}>
-        <View style={styles.activityStat}>
-          <View style={styles.activityCircle}>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
-              {formatCount(today.steps)}
-            </Text>
-          </View>
-          <Text style={styles.caption}>{formatDistance(today.distanceMeters)}</Text>
-          <Text style={styles.activityIcon}>👟</Text>
-          <Text style={styles.meta}>Steps</Text>
-        </View>
-        <View style={styles.activityStat}>
-          <View style={styles.activityCircle}>
-            <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
-              {formatCount(today.calories)}
-            </Text>
-          </View>
-          <Text style={styles.caption}>{'\u00a0'}</Text>
-          <Text style={styles.activityIcon}>🔥</Text>
-          <Text style={styles.meta}>Calories</Text>
-        </View>
+        <ActivityStat
+          caption={formatDistance(today.distanceMeters)}
+          icon="👟"
+          label="Steps"
+          value={formatCount(today.steps)}
+        />
+        <ActivityStat caption={'\u00a0'} icon="🔥" label="Calories" value={formatCount(today.calories)} />
       </View>
+      <View style={styles.activityRow}>
+        <ActivityStat
+          caption={load.status === 'scored' ? load.band : '—'}
+          icon="💓"
+          label="Stress"
+          value={load.status === 'scored' ? `${load.score}` : '—'}
+        />
+        <ActivityStat
+          caption={quality ? quality.label : '—'}
+          icon="🌙"
+          label="Sleep"
+          value={quality ? `${quality.score}` : '—'}
+        />
+      </View>
+      <Text style={[styles.meta, styles.stressLine]}>{stressContext(load)}</Text>
     </View>
   );
+}
+
+function ActivityStat({
+  value,
+  caption,
+  icon,
+  label,
+}: {
+  value: string;
+  caption: string;
+  icon: string;
+  label: string;
+}) {
+  return (
+    <View style={styles.activityStat}>
+      <View style={styles.activityCircle}>
+        <Text adjustsFontSizeToFit numberOfLines={1} style={styles.activityValue}>
+          {value}
+        </Text>
+      </View>
+      <Text style={styles.caption}>{caption}</Text>
+      <Text style={styles.activityIcon}>{icon}</Text>
+      <Text style={styles.meta}>{label}</Text>
+    </View>
+  );
+}
+
+function stressContext(load: RestingLoad): string {
+  if (load.status === 'need-still') return 'Need 30 minutes still today.';
+  if (load.status === 'need-baseline') return "Need last night's heart rate.";
+  return `Still ${load.stillBpm} bpm · sleep ${load.baselineBpm} · ${formatDuration(load.stillMinutes)}`;
 }
 
 export function HeartRateChart({
@@ -408,6 +460,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 16,
     justifyContent: 'space-evenly',
+  },
+  stressLine: {
+    textAlign: 'center',
   },
   activityStat: {
     alignItems: 'center',
