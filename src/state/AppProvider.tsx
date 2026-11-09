@@ -4,6 +4,7 @@ import { AppState } from 'react-native';
 import { closeRing, openRing } from '../ble/ringClient';
 import { describeAutomaticChecks } from '../ble/protocol';
 import { debugLog, flushDebugLog, hydrateDebugLog } from '../ble/debugLog';
+import { clearRingServices, hydrateRingServices } from '../ble/ringServices';
 import { getBleManager } from '../ble/manager';
 import { keepSleepRecord, keepStoredSamples, mergeReadings, defaultSettings, type AccelSample, type AppSettings, type ScanKind, type UploadPayload } from '../model';
 import { markRingAsleep, markSyncCompleted, markUploadAttempted, runAutoSync, setAutoSyncStatusSink, setSyncSnapshotSink } from '../sync/autoSync';
@@ -119,6 +120,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         loadLastPayload(),
         loadAutoSyncState(),
         hydrateDebugLog(),
+        hydrateRingServices(),
       ]);
       if (cancelled) return;
       setSettings(storedSettings);
@@ -258,7 +260,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const next = { ...stored, ringId, ringName };
         setSettings(next);
         await saveSettings(next);
-        if (previous && previous !== ringId) await releaseRing(previous);
+        if (previous && previous !== ringId) {
+          await releaseRing(previous);
+          clearRingServices();
+        }
         setStatus(`Saved ${ringName || 'ring'}.`);
         debugLog(`Selected ${ringName || ringId}`);
       });
@@ -273,6 +278,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSettings(next);
       await saveSettings(next);
       await releaseRing(stored.ringId);
+      clearRingServices();
       setStatus('Disconnected.');
       debugLog('Forgot the selected ring');
     });

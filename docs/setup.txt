@@ -98,4 +98,4 @@ Leaving the app open does not start a repeating heart-rate, blood-oxygen, or tem
 
 This needs a new development or TestFlight build. Background Bluetooth and the scheduler are native, so Expo Go cannot run them.
 
-The GATT service is 6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E. Writes go to 6E400002 and notifications come from 6E400003. Packets are 16 bytes. No pairing step.
+The GATT service is 6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E. Writes go to 6E400002 and notifications come from 6E400003. Packets are 16 bytes. The iOS build discovers that service and the sleep service DE5BF728-D711-4E47-AF26-65E3012A5DC7 only, so the media-remote service is left alone. Forget the ring in Bluetooth Settings. If iPhone still asks to pair, Cancel drops the link.

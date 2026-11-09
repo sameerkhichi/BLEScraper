@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { useRingServices } from '../ble/ringServices';
 import { openRing } from '../ble/ringClient';
 import { DebugLog } from '../components/debugLogView';
 import {
@@ -67,6 +68,7 @@ function latestSpot(spots: VitalSpot[] | undefined, field: 'spo2' | 'bodyTempera
 }
 
 export default function HomeScreen() {
+  const ringServices = useRingServices();
   const { busy, status, settings, queue, lastPayload, sync, scan, sendPending, forgetRing, recordHeartRate, withRing } =
     useAppState();
   const [heartPhase, setHeartPhase] = useState<'idle' | 'connecting' | 'live'>('idle');
@@ -297,6 +299,11 @@ export default function HomeScreen() {
           {settings.ringId ? (
             <Button label="Disconnect ring" onPress={() => void forgetRing()} tone="danger" />
           ) : null}
+          {ringServices.length > 0 ? (
+            <Text selectable style={styles.services}>
+              {ringServices.join('\n')}
+            </Text>
+          ) : null}
         </Card>
 
         <Card>
@@ -420,6 +427,11 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 14,
     lineHeight: 20,
+  },
+  services: {
+    color: colors.muted,
+    fontSize: 11,
+    lineHeight: 15,
   },
   warning: {
     color: colors.danger,

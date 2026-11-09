@@ -28,6 +28,21 @@ Notes
 - Testflight expires every 90 days. Will add a GitHub action to refresh the build every 60 days or on push to update code.
 -Expo is run through my main email on google sign on.
 
+Bluetooth
+
+The download uses CoreBluetooth and then disconnects. The iOS build opens two services: the UART service 6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E and the sleep service DE5BF728-D711-4E47-AF26-65E3012A5DC7. It does not open the media-remote service, which is what makes iPhone show the Pair sheet and save the ring in Bluetooth Settings. Forget the ring there once, and do not pair it from that list. If iPhone still asks to pair, Cancel drops the link, because this ring will not stay connected without the bond. Pair writes it back into Settings. A locked wake cannot tap that sheet, so the download only finishes when the sheet does not appear. A phone that is powered off cannot download, because Bluetooth is off.
+
+The Ring card lists the service UUIDs from the last connection, under Disconnect ring. That list is saved on the phone and is not sent to Solloid. After a normal download it is the two services above.
+
+An R09 normally exposes more than the app opens:
+
+- 6E40FFF0-B5A3-F393-E0A9-E50E24DCCA9E is the Nordic UART service. The app writes 6E400002 and listens on 6E400003. Heart rate, steps, battery, live sensors, and the wave detector go through here.
+- DE5BF728-D711-4E47-AF26-65E3012A5DC7 is the vendor big-data service. Sleep and the larger stored logs go through here.
+- 00001812-0000-1000-8000-00805F9B34FB is Human Interface Device, the media remote. The app does not open this.
+- 00001800-0000-1000-8000-00805F9B34FB Generic Access, 00001801-0000-1000-8000-00805F9B34FB Generic Attribute, 0000180A-0000-1000-8000-00805F9B34FB Device Information, and 0000180F-0000-1000-8000-00805F9B34FB Battery are the other standard services these rings commonly advertise. Battery in the app is read with the UART command, not the standard battery service.
+
+The card is the list for this ring. The usual set above is what these rings advertise, not a promise that this connection opened each one.
+
 Automatic sync
 
 The phone does not have to stay open. About every 4 hours iOS or Android wakes the app, it connects, downloads the stored record, sends it, and disconnects. iOS picks the real time and will not wake the app after it is swiped away. Opening the app again arms the next wake. Android shows a notification only while that download is running.

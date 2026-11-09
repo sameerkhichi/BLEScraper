@@ -261,9 +261,9 @@ export default function ScanScreen() {
   return (
     <ScrollView contentContainerStyle={styles.content} style={styles.screen}>
       <Text style={styles.body}>
-        Bluetooth is {bleState}. Hold the ring against the phone. A ring iOS is already connected to stops advertising,
-        so this screen drops the app link first and lists a ring the phone is still holding. If it shows under Settings,
-        Bluetooth, forget it there.
+        Bluetooth is {bleState}. Hold the ring against the phone. If the ring is listed under Settings, Bluetooth, forget
+        it there and do not pair it again. This app connects for a download, then disconnects. If iPhone asks to pair,
+        Cancel drops the link. Pair puts the ring back in Settings.
       </Text>
       {settings.ringId ? (
         <>

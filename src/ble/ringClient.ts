@@ -3,6 +3,7 @@ import type { Device, Subscription } from '@sfourdrinier/react-native-ble-plx';
 import type { BatteryReading, HeartRateSample, MetricSample, RingChecks, SleepNight, StepSample, VitalSpot } from '../model';
 import { base64ToBytes, bytesToBase64 } from './base64';
 import { debugLog } from './debugLog';
+import { rememberRingServices } from './ringServices';
 import { getBleManager } from './manager';
 import { isValidPacket } from './packet';
 import {
@@ -149,12 +150,17 @@ export class RingClient {
     let setupFailed: Error | null = null;
     try {
       device = await manager.connectToDevice(deviceId, { timeout: 20000 });
+      // The iOS build discovers only the UART and sleep services. Opening every
+      // service includes HID, and iOS then asks to pair the ring into Bluetooth Settings.
+      debugLog('Discovering the data services');
       await device.discoverAllServicesAndCharacteristics();
 
       let services = 'services unavailable';
       try {
         const found = await device.services();
-        services = found.map((service) => service.uuid).join(', ') || 'no services';
+        const ids = found.map((service) => service.uuid);
+        rememberRingServices(ids);
+        services = ids.join(', ') || 'no services';
       } catch (error) {
         services = error instanceof Error ? error.message : 'could not list services';
       }

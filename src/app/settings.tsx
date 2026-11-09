@@ -131,7 +131,7 @@ export default function SettingsScreen() {
           value={factoryGestures}
         />
         <Text style={styles.body}>
-          Leave this off. Turning it on is the ring's own gesture control, and that is what skips a song when the ring moves. The app turns it off again every time it disconnects, including after a sync. Poses on the Accelerometer screen are recognized on the phone and do not use it. If a song still skips with this off, after the app has disconnected, the phone has the ring saved as a media remote. Forget the ring in the phone's Bluetooth settings. Do not pair it from that list. Connect to it from this app.
+          Leave this off. Turning it on is the ring's own gesture control, and that is what skips a song when the ring moves. The app turns it off again every time it disconnects, including after a sync. Poses on the Accelerometer screen are recognized on the phone and do not use it. If a song still skips with this off, after the app has disconnected, the phone has the ring saved as a media remote. Forget the ring in the phone's Bluetooth settings and do not pair it from that list. The app connects on its own for each download.
         </Text>
         {gestureNote ? <Text style={styles.body}>{gestureNote}</Text> : null}
         <Text style={styles.label}>Ring checks</Text>
