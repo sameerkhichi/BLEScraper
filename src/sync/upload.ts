@@ -1,4 +1,5 @@
 import type { AppSettings, UploadPayload } from '../model';
+import { annotateSleep } from '../sleepScore';
 
 export async function postPayload(settings: AppSettings, payload: UploadPayload): Promise<void> {
   const url = settings.apiUrl.trim();
@@ -27,7 +28,10 @@ export async function postPayload(settings: AppSettings, payload: UploadPayload)
   const response = await fetch(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify(payload),
+    body: JSON.stringify({
+      ...payload,
+      sleep: payload.sleep.length === 0 ? [] : annotateSleep(payload.sleep),
+    }),
   });
   if (!response.ok) {
     throw new Error(`The server responded with ${response.status}.`);

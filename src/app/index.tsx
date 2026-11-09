@@ -284,7 +284,7 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.label}>Sleep</Text>
           {night ? (
-            <SleepNightSummary night={night} />
+            <SleepNightSummary night={night} nights={lastPayload?.sleep ?? []} />
           ) : (
             <Text style={styles.meta}>No night stored yet. Sync while the ring is nearby.</Text>
           )}

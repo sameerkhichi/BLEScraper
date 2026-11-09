@@ -20,6 +20,7 @@ import {
   temperatureZone,
   type TemperatureTone,
 } from '../sync/temperatureAlert';
+import { debtForNight, scoreSleepNight, sleepDebtLabel } from '../sleepScore';
 import { colors } from './ui';
 
 const WARN = '#f0c36a';
@@ -95,18 +96,6 @@ export function latestNight(nights: SleepNight[]): SleepNight | null {
   return nights.reduce((latest, night) => (night.daysAgo < latest.daysAgo ? night : latest));
 }
 
-// The ring does not report quality. This estimate favors about 8 hours asleep,
-// a larger share of deep and REM, and fewer awakenings.
-export function sleepQuality(night: SleepNight): { score: number; label: string } {
-  const asleepHours = night.minutesAsleep / 60;
-  const durationScore = Math.max(0, 100 - Math.abs(asleepHours - 8) * 15);
-  const restorative =
-    night.minutesAsleep === 0 ? 0 : ((night.minutesDeep + night.minutesRem) / night.minutesAsleep) * 100;
-  const awakePenalty = Math.min(40, night.awakenings * 8 + night.minutesAwake / 3);
-  const score = Math.round(Math.max(0, Math.min(100, durationScore * 0.5 + restorative * 0.5 - awakePenalty)));
-  const label = score >= 85 ? 'Excellent' : score >= 70 ? 'Good' : score >= 50 ? 'Fair' : 'Poor';
-  return { score, label };
-}
 
 export function ActivityChart({
   steps,
@@ -120,7 +109,7 @@ export function ActivityChart({
   const today = activityForLocalDay(steps);
   const summary = stressSummary(stress, sleep);
   const night = latestNight(sleep);
-  const quality = night ? sleepQuality(night) : null;
+  const quality = night ? scoreSleepNight(night) : null;
 
   return (
     <View style={styles.block}>
@@ -476,8 +465,9 @@ export function Thermometer({ celsius }: { celsius: number | null }) {
   );
 }
 
-export function SleepNightSummary({ night }: { night: SleepNight }) {
-  const quality = sleepQuality(night);
+export function SleepNightSummary({ night, nights }: { night: SleepNight; nights?: SleepNight[] }) {
+  const quality = scoreSleepNight(night);
+  const debtMinutes = debtForNight(nights ?? [night], night);
   const legend: SleepStageName[] = ['deep', 'light', 'rem', 'awake'];
   if (night.minutesUnknown > 0) legend.push('unknown');
 
@@ -495,8 +485,10 @@ export function SleepNightSummary({ night }: { night: SleepNight }) {
         <View style={styles.summaryStat}>
           <Text style={[styles.summaryValue, { color: qualityColor(quality.label) }]}>{quality.score}</Text>
           <Text style={styles.meta}>{`${quality.label} · estimated`}</Text>
+          <Text style={styles.meta}>{sleepDebtLabel(debtMinutes)}</Text>
         </View>
       </View>
+      {quality.endedInDeepSleep ? <Text style={styles.meta}>Ended in deep sleep</Text> : null}
       <View style={styles.stageRow}>
         <StageTime label="Deep" minutes={night.minutesDeep} />
         <StageTime label="Light" minutes={night.minutesLight} />

@@ -21,7 +21,7 @@ Notes
 - The body-temperature card and a phone notification use the same lines. Fever is 38°C (100.4°F) or higher. Below 35°C (95°F) is mild hypothermia, below 32°C (89.6°F) is moderate, and below 28°C (82.4°F) is severe. 35.0°C through 37.9°C stays normal. The rules are under Body temperature.
 - Those switches are on the Settings screen. On the home screen, open the Arduino card and tap Settings. Apply to ring writes them immediately. The next download writes them again if the ring's answer does not match. An older ring that ignores HRV keeps the other three.
 - While the app is open, nothing cycles the sensor. The only automatic phone cycle is the download of data the ring already stored, about every 4 hours, or once when the app is opened and a download is already due. The Measure buttons run only when tapped. A download holds the radio for a short read, then disconnects, and the ring continues. iOS will not wake the app after it is swiped away.
-- The sleep score is estimated on the phone from the stages. The ring does not send one, and the score is not in the upload.
+- The sleep score and sleep debt are estimated on the phone from the stages. The ring does not send them. The upload adds them to each night. The calculation is under Sleep score.
 - The stress number is the ring's own 0–99 estimate. The phone does not invent one from heart rate. The bands and the day summary are under Stress score.
 - Will allow for HTTP/JSON communication with an API.
 - EAS Build will upload the ipa build to app store connect
@@ -60,19 +60,25 @@ A wake stores the sleep nights still on the ring, whether or not the ring is bei
 
 Sleep score
 
-The ring does not report a score. The phone estimates one for the Sleep screen and labels it estimated. That number is not stored as its own field and is not sent in the JSON. Solloid can recompute it from the stages.
+The ring does not report a score. The phone estimates one from the stages already stored and labels it estimated. Latency is left out. startedAt is when the ring opened the session, not when the person got into bed, so the phone does not pretend to know how long it took to fall asleep. The other four weights are divided by 0.95 so they still sum to 1:
 
-minutesAsleep is light + deep + rem. Awake and unknown minutes are left out of that total. awakenings is how many awake stages were stored. minutesAwake is the sum of those awake stages.
+score = (0.30 duration + 0.25 efficiency + 0.25 architecture + 0.15 continuity) / 0.95
 
-The score is three parts, then clamped to 0–100 and rounded.
+The result is clamped to 0–100 and rounded. 85 or more is Excellent. 70 or more is Good. 50 or more is Fair. Anything lower is Poor.
 
-Duration. Eight hours asleep scores 100. Each hour shorter or longer than 8 costs 15 points, and the result cannot go below 0. Six hours and ten hours both score 70. Under about 1 hour 20 minutes, or over about 14 hours 40 minutes, duration scores 0.
+Duration uses minutesAsleep, which is light + deep + rem. 7 through 9 hours scores 100. The short side is 0 at 0 hours, 19 at 4, 49 at 5, 79 at 6, and 100 at 7. The long side mirrors that: 79 at 10 hours, 49 at 11, 19 at 12, and 0 at 13 or more. Values between those hours are linear.
 
-Restorative sleep. This is the percent of minutesAsleep that was deep or REM. Light sleep is in the total, so it lowers this percent. A night with no time asleep scores 0. Unknown minutes are not part of this percent.
+Efficiency is minutesAsleep divided by minutesInBed, the ring's session window. 90% or more scores 100. 60% or less scores 0. Between those is linear. A session with no in-bed time scores 0.
 
-Awake penalty. Each awakening costs 8 points, and each minute awake costs one third of a point. The penalty stops at 40.
+Architecture is the share of minutesAsleep in each stage. Deep scores 100 from 13% to 23%. REM scores 100 from 20% to 25%. Light scores 100 from 50% to 60%. Each percentage point outside a band costs 5 points, and a stage score cannot go below 0. Architecture is 45% deep, 45% REM, and 10% light. Awake time is not in this part, so it is not counted twice. No time asleep scores 0.
 
-The score is half the duration part plus half the restorative part, minus the awake penalty. 85 or more is Excellent. 70 or more is Good. 50 or more is Fair. Anything lower is Poor.
+Continuity uses minutesAwake and awakenings. 20 awake minutes or fewer scores 100, and 60 or more scores 0. Fewer than 2 awakenings scores 100, and 6 or more scores 0. Between each pair is linear. Continuity is the average of those two. The longest awake stage is shown when a night is expanded. It is not part of the score.
+
+If the last stage that is not trailing awake time is deep, the phone subtracts 5 points after the weighted sum and the card says "Ended in deep sleep."
+
+Sleep debt uses 8 hours as the need. Nights are walked from oldest startedAt to newest. Each night adds minutesAsleep minus 480. Extra sleep pays the balance down, and the balance never goes above 0, so a long night does not create a credit. sleepDebtMinutes on a night is the minutes still owed after that night. The home sleep card and the newest history card show that balance. 0 is "No sleep debt."
+
+The upload stamps score, scoreLabel, endedInDeepSleep, and sleepDebtMinutes onto each night at send time, including a body that was already waiting in the queue. A live reading that sends "sleep": [] stays an empty list. Solloid can read the newest night's sleepDebtMinutes as the balance on the card.
 
 Stress score
 
@@ -130,7 +136,7 @@ Sync posts one JSON body to the API URL (HTTP or the port-forwarded Arduino IP).
 
 Timestamps are UTC ISO-8601. The app sets the ring clock to UTC, and sleep start/end are minutes after that midnight. If start is later than end, sleep began the evening before the wake-up day.
 
-The ring sends stages, not a score and not cycle numbers. The score shown in the app is the phone estimate described under Sleep score. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM.
+The ring sends stages, not a score and not cycle numbers. The phone adds the estimate from Sleep score when it posts. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM.
 
 {
   "source": "colmi-r09",
@@ -162,6 +168,10 @@ The ring sends stages, not a score and not cycle numbers. The score shown in the
       "minutesAwake": 20,
       "minutesUnknown": 0,
       "awakenings": 1,
+      "score": 54,
+      "scoreLabel": "Fair",
+      "endedInDeepSleep": false,
+      "sleepDebtMinutes": 350,
       "stages": [
         { "stage": "light", "minutes": 40, "startedAt": "2026-11-05T23:00:00.000Z" },
         { "stage": "deep", "minutes": 50, "startedAt": "2026-11-05T23:40:00.000Z" },
