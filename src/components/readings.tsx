@@ -3,6 +3,7 @@ import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 
 import {
   activityForLocalDay,
+  latestMetric,
   stressBand,
   stressSummary,
   type MetricSample,
@@ -108,6 +109,7 @@ export function ActivityChart({
 }) {
   const today = activityForLocalDay(steps);
   const summary = stressSummary(stress, sleep);
+  const latestStress = latestMetric(stress);
   const night = latestNight(sleep);
   const quality = night ? scoreSleepNight(night) : null;
 
@@ -125,10 +127,10 @@ export function ActivityChart({
       </View>
       <View style={styles.activityRow}>
         <ActivityStat
-          caption={summary.current ? summary.current.band : '—'}
+          caption={latestStress ? stressBand(latestStress.value) : '—'}
           icon="💓"
           label="Stress"
-          value={summary.current ? `${summary.current.value}` : '—'}
+          value={latestStress ? `${latestStress.value}` : '—'}
         />
         <ActivityStat
           caption={quality ? quality.label : '—'}
@@ -174,10 +176,21 @@ function stressContext(summary: StressSummary): string {
 
 const STRESS_TICKS = [100, 75, 50, 25, 0];
 
-export function StressPanel({ summary, live }: { summary: StressSummary; live: number | null }) {
-  const value = live ?? summary.current?.value ?? null;
-  const band = live !== null ? stressBand(live) : (summary.current?.band ?? null);
-  const points = summary.today.map((sample) => sample.value);
+export function StressPanel({
+  summary,
+  live,
+  points,
+  reading,
+}: {
+  summary: StressSummary;
+  live: number | null;
+  points?: number[];
+  reading?: MetricSample | null;
+}) {
+  const series = points ?? summary.today.map((sample) => sample.value);
+  const value = live ?? reading?.value ?? summary.current?.value ?? null;
+  const band =
+    live !== null ? stressBand(live) : reading ? stressBand(reading.value) : (summary.current?.band ?? null);
   const baselines = baselineLine(summary);
 
   return (
@@ -188,10 +201,10 @@ export function StressPanel({ summary, live }: { summary: StressSummary; live: n
           <Text style={styles.meta}>{band ?? '0–99'}</Text>
         </View>
       </View>
-      {points.length === 0 ? (
-        <Text style={styles.meta}>No daytime stress yet.</Text>
+      {series.length === 0 ? (
+        <Text style={styles.meta}>{points ? 'No stress samples yet.' : 'No daytime stress yet.'}</Text>
       ) : (
-        <SeriesLine max={100} min={0} points={points} ticks={STRESS_TICKS} />
+        <SeriesLine max={100} min={0} points={series} ticks={STRESS_TICKS} />
       )}
       <View style={styles.summaryRow}>
         <View style={styles.summaryStat}>
@@ -358,7 +371,7 @@ export function HeartRateChart({
         </View>
       </View>
       {points.length === 0 ? (
-        <Text style={styles.meta}>{live ? 'Measuring. The first beat takes a few seconds.' : 'Measure to draw your heart rate.'}</Text>
+        <Text style={styles.meta}>{live ? 'Measuring. The first beat takes a few seconds.' : 'No heart-rate log yet.'}</Text>
       ) : (
         <SeriesLine max={SCALE_MAX} min={SCALE_MIN} points={points} ticks={SCALE_TICKS} />
       )}

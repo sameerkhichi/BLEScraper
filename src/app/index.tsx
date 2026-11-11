@@ -19,7 +19,7 @@ import {
   Thermometer,
 } from '../components/readings';
 import { Button, Card, colors } from '../components/ui';
-import { stressSummary, type UploadPayload, type VitalSpot } from '../model';
+import { latestHeartRate, latestMetric, latestVital, stressSummary, type UploadPayload } from '../model';
 import { LOW_BATTERY_PERCENT } from '../sync/batteryAlert';
 import { FEVER_C, MILD_HYPOTHERMIA_C } from '../sync/temperatureAlert';
 import { pauseAutoSync } from '../sync/ringGate';
@@ -61,13 +61,11 @@ function latestToday(samples: { timestamp: string }[]): string | null {
   return latest;
 }
 
-function latestSpot(spots: VitalSpot[] | undefined, field: 'spo2' | 'bodyTemperatureC'): string | null {
-  let latest: string | null = null;
-  for (const spot of spots ?? []) {
-    if (typeof spot[field] !== 'number') continue;
-    if (!latest || spot.timestamp > latest) latest = spot.timestamp;
-  }
-  return latest;
+function plotNumbers<T extends { timestamp: string }>(samples: T[] | undefined, read: (sample: T) => number): number[] {
+  return [...(samples ?? [])]
+    .filter((sample) => Number.isFinite(Date.parse(sample.timestamp)) && Number.isFinite(read(sample)))
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
+    .map(read);
 }
 
 export default function HomeScreen() {
@@ -94,13 +92,12 @@ export default function HomeScreen() {
   const motion = lastPayload?.accelerometer;
   const night = latestNight(lastPayload?.sleep ?? []);
   const dayStress = stressSummary(lastPayload?.stress ?? [], lastPayload?.sleep ?? []);
-  const heartTaken =
-    heartAt != null
-      ? new Date(heartAt).toISOString()
-      : lastPayload?.realtimeHeartRateAt ?? lastPayload?.heartRate.at(-1)?.timestamp ?? null;
-  const oxygenTaken = typeof lastPayload?.spo2 === 'number' ? latestSpot(lastPayload.vitalSpots, 'spo2') : null;
-  const temperatureTaken =
-    typeof lastPayload?.bodyTemperatureC === 'number' ? latestSpot(lastPayload.vitalSpots, 'bodyTemperatureC') : null;
+  const storedHeart = latestHeartRate(lastPayload);
+  const oxygen = latestVital(lastPayload?.vitalSpots, 'spo2');
+  const temperature = latestVital(lastPayload?.vitalSpots, 'bodyTemperatureC');
+  const storedStress = latestMetric(lastPayload?.stress);
+  const measuringHeart = heartPhase === 'live';
+  const heartTaken = measuringHeart && heartAt != null ? new Date(heartAt).toISOString() : storedHeart?.timestamp ?? null;
 
   const requireRing = (action: () => void) => {
     if (!settings.ringId) {
@@ -158,7 +155,10 @@ export default function HomeScreen() {
     } finally {
       resume();
       heartStop.current = null;
-      if (heartMounted.current) setHeartPhase('idle');
+      if (heartMounted.current) {
+        setHeartPhase('idle');
+        setBeats([]);
+      }
       const bpm = bpmRef.current;
       if (bpm !== null) void recordHeartRate(bpm);
     }
@@ -219,13 +219,9 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.label}>Heart rate</Text>
           <HeartRateChart
-            bpm={heartPhase === 'idle' ? (liveBpm ?? lastPayload?.realtimeHeartRate ?? null) : liveBpm}
-            live={heartPhase === 'live'}
-            points={
-              heartPhase === 'idle' && beats.length === 0
-                ? (lastPayload?.heartRate ?? []).slice(-BEAT_POINTS).map((sample) => sample.bpm)
-                : beats
-            }
+            bpm={measuringHeart ? liveBpm : storedHeart?.bpm ?? null}
+            live={measuringHeart}
+            points={measuringHeart ? beats : plotNumbers(lastPayload?.heartRate, (sample) => sample.bpm)}
           />
           <TakenLine timestamp={heartTaken} />
           {heartError ? <Text style={styles.warning}>{heartError}</Text> : null}
@@ -243,8 +239,8 @@ export default function HomeScreen() {
 
         <Card>
           <Text style={styles.label}>Blood oxygen</Text>
-          <OxygenMeter spo2={lastPayload?.spo2 ?? null} />
-          <TakenLine timestamp={oxygenTaken} />
+          <OxygenMeter spo2={oxygen?.value ?? null} />
+          <TakenLine timestamp={oxygen?.timestamp ?? null} />
           <Button
             disabled={busy}
             label="Measure blood oxygen"
@@ -255,8 +251,8 @@ export default function HomeScreen() {
 
         <Card>
           <Text style={styles.label}>Body temperature</Text>
-          <Thermometer celsius={lastPayload?.bodyTemperatureC ?? null} />
-          <TakenLine timestamp={temperatureTaken} />
+          <Thermometer celsius={temperature?.value ?? null} />
+          <TakenLine timestamp={temperature?.timestamp ?? null} />
           <Button
             disabled={busy}
             label="Measure body temperature"
@@ -269,8 +265,13 @@ export default function HomeScreen() {
 
         <Card>
           <Text style={styles.label}>Stress</Text>
-          <StressPanel live={stressPhase === 'measuring' ? liveStress : null} summary={dayStress} />
-          <TakenLine timestamp={dayStress.current?.timestamp ?? null} />
+          <StressPanel
+            live={stressPhase === 'measuring' ? liveStress : null}
+            points={plotNumbers(lastPayload?.stress, (sample) => sample.value)}
+            reading={storedStress}
+            summary={dayStress}
+          />
+          <TakenLine timestamp={storedStress?.timestamp ?? null} />
           {stressError ? <Text style={styles.warning}>{stressError}</Text> : null}
           {stressPhase === 'measuring' ? <ActivityIndicator color={colors.accent} /> : null}
           <Button
@@ -302,11 +303,11 @@ export default function HomeScreen() {
         <Card>
           <Text style={styles.label}>Last reading</Text>
           <View style={styles.metrics}>
-            <Metric label="Heart rate" value={formatReading(lastPayload?.realtimeHeartRate)} />
-            <Metric label="SpO2" value={formatReading(lastPayload?.spo2, '%')} />
+            <Metric label="Heart rate" value={formatReading(storedHeart?.bpm)} />
+            <Metric label="SpO2" value={formatReading(oxygen?.value, '%')} />
             <Metric
               label="Temp"
-              value={typeof lastPayload?.bodyTemperatureC === 'number' ? `${lastPayload.bodyTemperatureC.toFixed(1)}°` : '—'}
+              value={typeof temperature?.value === 'number' ? `${temperature.value.toFixed(1)}°` : '—'}
             />
             <Metric label="HR samples" value={`${lastPayload?.heartRate.length ?? 0}`} />
             <Metric label="Steps" value={`${totalSteps(lastPayload)}`} />

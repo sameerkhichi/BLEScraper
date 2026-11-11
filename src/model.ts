@@ -429,6 +429,72 @@ export function isMetricSample(value: unknown): value is MetricSample {
   return typeof sample.timestamp === 'string' && Number.isFinite(Date.parse(sample.timestamp)) && typeof sample.value === 'number';
 }
 
+function sampleTime(timestamp: string | null | undefined): number | null {
+  if (!timestamp) return null;
+  const time = Date.parse(timestamp);
+  return Number.isFinite(time) ? time : null;
+}
+
+// A log download leaves realtimeHeartRate empty, and a merge keeps the last probe.
+// The card has to compare that probe with the stored log instead of reading one field.
+export function latestHeartRate(
+  payload: {
+    heartRate?: HeartRateSample[] | null;
+    realtimeHeartRate?: number | null;
+    realtimeHeartRateAt?: string | null;
+  } | null,
+): { bpm: number; timestamp: string } | null {
+  let best: { bpm: number; timestamp: string; time: number } | null = null;
+  for (const sample of payload?.heartRate ?? []) {
+    const time = sampleTime(sample.timestamp);
+    if (time === null || !Number.isFinite(sample.bpm) || sample.bpm <= 0) continue;
+    if (!best || time >= best.time) best = { bpm: sample.bpm, timestamp: sample.timestamp, time };
+  }
+  const probe = payload?.realtimeHeartRate;
+  const probeAt = payload?.realtimeHeartRateAt;
+  const probeTime = sampleTime(probeAt);
+  if (
+    probeTime !== null &&
+    typeof probe === 'number' &&
+    Number.isFinite(probe) &&
+    probe > 0 &&
+    probeAt &&
+    (!best || probeTime > best.time)
+  ) {
+    return { bpm: probe, timestamp: probeAt };
+  }
+  return best ? { bpm: best.bpm, timestamp: best.timestamp } : null;
+}
+
+// The spo2 and bodyTemperatureC scalars are only the newest spot from the last download.
+export function latestVital(
+  spots: VitalSpot[] | null | undefined,
+  field: 'spo2' | 'bodyTemperatureC',
+): { value: number; timestamp: string } | null {
+  let best: { value: number; timestamp: string; time: number } | null = null;
+  for (const spot of spots ?? []) {
+    const value = spot[field];
+    const time = sampleTime(spot.timestamp);
+    if (typeof value !== 'number' || !Number.isFinite(value) || time === null) continue;
+    if (!best || time >= best.time) best = { value, timestamp: spot.timestamp, time };
+  }
+  return best ? { value: best.value, timestamp: best.timestamp } : null;
+}
+
+export function latestMetric(samples: MetricSample[] | null | undefined): MetricSample | null {
+  let best: MetricSample | null = null;
+  let bestTime = -Infinity;
+  for (const sample of samples ?? []) {
+    const time = sampleTime(sample.timestamp);
+    if (time === null || !Number.isFinite(sample.value)) continue;
+    if (time >= bestTime) {
+      best = sample;
+      bestTime = time;
+    }
+  }
+  return best;
+}
+
 export function mergeVitalSpots(spots: VitalSpot[]): VitalSpot[] {
   const byTime = new Map<string, VitalSpot>();
   for (const spot of spots) {

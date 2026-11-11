@@ -3,11 +3,15 @@ import test from 'node:test';
 
 import {
   activityForLocalDay,
+  latestHeartRate,
+  latestMetric,
+  latestVital,
   stressHistoryDays,
   stressSummary,
   type MetricSample,
   type SleepNight,
   type StepSample,
+  type VitalSpot,
 } from './model';
 
 function slot(timestamp: string, steps: number, calories: number, distanceMeters: number): StepSample {
@@ -197,6 +201,49 @@ test('stress history keeps daytime samples and reports average, peak, and minimu
   assert.deepEqual(
     days[1].samples.map((sample) => sample.value),
     [10, 20, 40, 80, 90],
+  );
+});
+
+test('latest heart rate prefers the newer of the stored log and the probe', () => {
+  const stored = { timestamp: '2026-11-08T12:00:00.000Z', bpm: 80 };
+  const olderProbe = latestHeartRate({
+    heartRate: [stored],
+    realtimeHeartRate: 70,
+    realtimeHeartRateAt: '2026-11-08T11:00:00.000Z',
+  });
+  assert.deepEqual(olderProbe, { bpm: 80, timestamp: stored.timestamp });
+
+  const newerProbe = latestHeartRate({
+    heartRate: [stored],
+    realtimeHeartRate: 90,
+    realtimeHeartRateAt: '2026-11-08T13:00:00.000Z',
+  });
+  assert.deepEqual(newerProbe, { bpm: 90, timestamp: '2026-11-08T13:00:00.000Z' });
+
+  assert.equal(latestHeartRate(null), null);
+  assert.equal(latestHeartRate({ heartRate: [], realtimeHeartRate: null, realtimeHeartRateAt: null }), null);
+});
+
+test('latest vital skips a spot that is missing the field', () => {
+  const spots: VitalSpot[] = [
+    { timestamp: '2026-11-08T12:00:00.000Z', spo2: 97, bodyTemperatureC: null },
+    { timestamp: '2026-11-08T13:00:00.000Z', spo2: null, bodyTemperatureC: 36.5 },
+  ];
+  assert.deepEqual(latestVital(spots, 'spo2'), { value: 97, timestamp: '2026-11-08T12:00:00.000Z' });
+  assert.deepEqual(latestVital(spots, 'bodyTemperatureC'), { value: 36.5, timestamp: '2026-11-08T13:00:00.000Z' });
+  assert.equal(latestVital([], 'spo2'), null);
+});
+
+test('latest metric returns the newest finite sample', () => {
+  assert.equal(latestMetric([]), null);
+  assert.equal(latestMetric(null), null);
+  assert.deepEqual(
+    latestMetric([
+      stress('2026-11-08T15:00:00.000Z', 40),
+      stress('2026-11-08T10:00:00.000Z', 10),
+      stress('2026-11-08T16:00:00.000Z', Number.NaN),
+    ]),
+    stress('2026-11-08T15:00:00.000Z', 40),
   );
 });
 
