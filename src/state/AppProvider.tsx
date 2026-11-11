@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 
+import { getBleManager, prepareRestoredRing } from '../ble/manager';
 import { closeRing, openRing } from '../ble/ringClient';
 import {
   describeFirmware,
@@ -13,7 +14,6 @@ import {
 } from '../ble/ringSettings';
 import { debugLog, flushDebugLog, hydrateDebugLog } from '../ble/debugLog';
 import { clearRingServices, hydrateRingServices } from '../ble/ringServices';
-import { getBleManager } from '../ble/manager';
 import {
   clearPendingField,
   dropStoredRange,
@@ -155,6 +155,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setSettings(storedSettings);
       setQueue(storedQueue);
       setLastPayload(storedLast);
+      const restored = prepareRestoredRing(storedSettings.ringId);
       try {
         await ensureNotificationPermission(true);
         if (!cancelled) {
@@ -165,6 +166,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
         const message = error instanceof Error ? error.message : 'Could not ask for notifications.';
         debugLog(message);
       }
+      await restored;
       if (cancelled) return;
       setReady(true);
       const upload = evaluateUpload(syncState.uploadAt, storedQueue.length, Date.now());

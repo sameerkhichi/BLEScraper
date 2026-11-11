@@ -154,7 +154,17 @@ export class RingClient {
     let client: RingClient | null = null;
     let setupFailed: Error | null = null;
     try {
-      device = await manager.connectToDevice(deviceId, { timeout: 20000 });
+      try {
+        if (await manager.isDeviceConnected(deviceId)) {
+          debugLog(`Ring ${deviceId} is already connected.`);
+          const known = await manager.devices([deviceId]);
+          device = known.find((item) => item.id === deviceId) ?? null;
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Could not check the ring connection.';
+        debugLog(message);
+      }
+      if (!device) device = await manager.connectToDevice(deviceId, { timeout: 20000 });
       // The iOS build discovers the UART and sleep services and the four data
       // characteristics only. It does not read or write an encrypted attribute,
       // so CoreBluetooth does not start a bond.

@@ -84,10 +84,10 @@ export default function DebugScreen() {
                 The ring keeps its own heart-rate interval and the blood oxygen, stress, and HRV switches. Settings at the top right reads them from the ring. A download does not write them again. BLEScraper does not take those readings on its own.
               </Text>
               <Text style={styles.body}>
-                About every {CATCHUP_HOURS} hours the phone wakes, downloads the stored record, sends it, and disconnects. Opening BLEScraper runs that download when one is due. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.
+                The iPhone checks for ring data when iOS allows background activity. That depends on scheduling, settings, battery, and how the phone is used. Opening BLEScraper downloads when {CATCHUP_HOURS} hours have passed. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.
               </Text>
               <Text style={styles.body}>
-                A notification appears when that wake starts and when it finishes. Opening the app is not required for the next one. iOS chooses the time and will not wake the app after you swipe it away. The download does not wait for Wi-Fi.
+                A notification appears when a wake starts and when it finishes. A wake sends waiting readings first. Leaving BLEScraper in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. The download does not wait for Wi-Fi.
               </Text>
               <Text style={styles.body}>
                 {lastWake
@@ -97,7 +97,7 @@ export default function DebugScreen() {
             </>
           ) : (
             <Text style={styles.body}>
-              Automatic download is off. Turn it on in Settings at the top right. With it on, leave BLEScraper in the app switcher. The phone wakes about every {CATCHUP_HOURS} hours to download what the ring has stored.
+              Automatic download is off. Turn it on in Settings at the top right. With it on, the iPhone checks for ring data when iOS allows background activity. Opening the app downloads when {CATCHUP_HOURS} hours have passed.
             </Text>
           )}
         </View>

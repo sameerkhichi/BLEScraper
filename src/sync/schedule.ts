@@ -11,6 +11,10 @@ export const UNWORN_INTERVAL_MS = DOWNLOAD_INTERVAL_MS;
 export const UPLOAD_INTERVAL_MS = 60 * 60 * 1000;
 export const CATCHUP_HOURS = DOWNLOAD_HOURS;
 export const CATCHUP_INTERVAL_MINUTES = DOWNLOAD_HOURS * 60;
+// iOS processing wakes are the long overnight slot. The 4-hour rule stays in evaluateSchedule.
+export const PROCESSING_INTERVAL_MINUTES = 12 * 60;
+// A refresh wake reads the recent record. Keep this equal to the native historyDays value.
+export const REFRESH_HISTORY_DAYS = 2;
 // The ring keeps about a week. One wake can still recover a missed day.
 export const STORED_DAYS = 7;
 

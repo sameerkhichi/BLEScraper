@@ -26,6 +26,8 @@ import {
   saveLastPayload,
   saveQueue,
 } from './storage';
+import { backgroundExpired } from './backgroundBudget';
+import { prepareRestoredRing } from '../ble/manager';
 import { collectRing } from './syncRing';
 import { postPayload } from './upload';
 
@@ -78,76 +80,103 @@ export async function markUploadAttempted(): Promise<void> {
   await saveAutoSyncState({ ...state, uploadAt: new Date().toISOString() });
 }
 
-export async function runCatchUp(): Promise<AutoSyncResult> {
+export async function runCatchUp(options: { historyDays?: number } = {}): Promise<AutoSyncResult> {
   if (Platform.OS === 'web') return idle(DOWNLOAD_INTERVAL_MS);
   if (autoSyncPaused()) return idle(PAUSED_WAIT_MS);
 
   const settings = await loadSettings();
   if (!settings.autoSync || !settings.ringId) return idle(DOWNLOAD_INTERVAL_MS);
+  if (backgroundExpired()) return expiredResult();
 
-  return runWithRing(async () => {
-    const current = await loadSettings();
-    if (!current.autoSync || !current.ringId || autoSyncPaused()) return idle(PAUSED_WAIT_MS);
+  await prepareRestoredRing(settings.ringId);
+  if (backgroundExpired()) return expiredResult();
 
-    let radioHeld = false;
+  const uploaded = await runWithQueue(() => flushQueueNow(settings));
+  if (backgroundExpired()) return uploaded ?? expiredResult();
+
+  const decision = evaluateSchedule(await loadAutoSyncState(), Date.now());
+  if (!shouldSync(decision.plan)) {
+    if (uploaded) return { ...uploaded, waitMs: decision.waitMs || uploaded.waitMs };
+    return idle(decision.waitMs);
+  }
+
+  const historyDays = options.historyDays ?? STORED_DAYS;
+  return runWithRing(() => downloadCatchUp(historyDays, uploaded));
+}
+
+async function downloadCatchUp(
+  historyDays: number,
+  uploaded: AutoSyncResult | null,
+): Promise<AutoSyncResult> {
+  const current = await loadSettings();
+  if (!current.autoSync || !current.ringId || autoSyncPaused() || backgroundExpired()) {
+    return uploaded ?? idle(PAUSED_WAIT_MS);
+  }
+
+  let radioHeld = false;
+  try {
     try {
-      try {
-        await holdAndroidRadio();
-        radioHeld = true;
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'could not keep Bluetooth awake';
-        debugLog(message);
-      }
-
-      report('Waking to download the ring record');
-      const client = await openRing(current.ringId);
-      const collected = await collectRing(
-        client,
-        current.ringId,
-        current.ringName,
-        { logs: true, vitals: false, sleep: true },
-        report,
-        { probeWear: false, historyDays: STORED_DAYS },
-      );
-      const downloaded = collected.payload;
-      await closeRing();
-      if (radioHeld) {
-        radioHeld = false;
-        await releaseAndroidRadio();
-      }
-
-      return await runWithQueue(async () => {
-        const previous = await loadLastPayload();
-        const merged = keepStoredSamples(
-          previous,
-          mergeReadings(previous, withSleep(previous, downloaded, collected.sleepLoaded), false),
-        );
-        merged.syncedAt = new Date().toISOString();
-        const changed = readingChanged(previous, merged);
-        const storedQueue = await loadQueue();
-        const nextQueue = changed ? enqueue(storedQueue, merged) : storedQueue;
-        await saveLastPayload(merged);
-        await saveQueue(nextQueue);
-        await markSyncCompleted({ logs: true, sleep: collected.sleepLoaded });
-        snapshotSink?.({ queue: nextQueue, lastPayload: merged });
-        const flushed = await flushQueueNow(current);
-        if (flushed) return flushed;
-        if (!current.apiUrl.trim()) {
-          return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' };
-        }
-        return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Downloaded the ring record.' };
-      });
+      await holdAndroidRadio();
+      radioHeld = true;
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Sync failed.';
+      const message = error instanceof Error ? error.message : 'could not keep Bluetooth awake';
       debugLog(message);
-      const failed: AutoSyncState = { ...(await loadAutoSyncState()), failedAt: new Date().toISOString() };
-      await saveAutoSyncState(failed);
-      return { outcome: 'failed', waitMs: evaluateSchedule(failed, Date.now()).waitMs, message };
-    } finally {
-      await closeRing();
-      if (radioHeld) await releaseAndroidRadio();
     }
-  });
+
+    report('Waking to download the ring record');
+    const client = await openRing(current.ringId);
+    const collected = await collectRing(
+      client,
+      current.ringId,
+      current.ringName,
+      { logs: true, vitals: false, sleep: true },
+      report,
+      { probeWear: false, historyDays },
+    );
+    const downloaded = collected.payload;
+    await closeRing();
+    if (radioHeld) {
+      radioHeld = false;
+      await releaseAndroidRadio();
+    }
+
+    return await runWithQueue(async () => {
+      const previous = await loadLastPayload();
+      const merged = keepStoredSamples(
+        previous,
+        mergeReadings(previous, withSleep(previous, downloaded, collected.sleepLoaded), false),
+      );
+      merged.syncedAt = new Date().toISOString();
+      const changed = readingChanged(previous, merged);
+      const storedQueue = await loadQueue();
+      const nextQueue = changed ? enqueue(storedQueue, merged) : storedQueue;
+      await saveLastPayload(merged);
+      await saveQueue(nextQueue);
+      snapshotSink?.({ queue: nextQueue, lastPayload: merged });
+      if (backgroundExpired()) return expiredResult();
+      await markSyncCompleted({ logs: true, sleep: collected.sleepLoaded });
+      const flushed = await flushQueueNow(current);
+      if (flushed) return flushed;
+      if (!current.apiUrl.trim()) {
+        return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' };
+      }
+      return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Downloaded the ring record.' };
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Sync failed.';
+    debugLog(message);
+    const failed: AutoSyncState = { ...(await loadAutoSyncState()), failedAt: new Date().toISOString() };
+    await saveAutoSyncState(failed);
+    const note = uploaded?.message ? `${uploaded.message} ${message}` : message;
+    return { outcome: 'failed', waitMs: evaluateSchedule(failed, Date.now()).waitMs, message: note };
+  } finally {
+    await closeRing();
+    if (radioHeld) await releaseAndroidRadio();
+  }
+}
+
+function expiredResult(): AutoSyncResult {
+  return { outcome: 'failed', waitMs: DOWNLOAD_INTERVAL_MS, message: 'Background time expired.' };
 }
 
 export async function runAutoSync(options: { allowAndroidService: boolean }): Promise<AutoSyncResult> {
