@@ -226,6 +226,106 @@ export function StressPanel({ summary, live }: { summary: StressSummary; live: n
   );
 }
 
+const DAY_MINUTES = 24 * 60;
+const DAY_HOURS = [0, 6, 12, 18];
+
+export function StressDayPlot({ samples }: { samples: MetricSample[] }) {
+  const [plotWidth, setPlotWidth] = useState(0);
+  const yFor = (value: number) => {
+    const clamped = Math.max(0, Math.min(100, value));
+    const inset = 8;
+    return inset + ((100 - clamped) / 100) * (CHART_HEIGHT - inset * 2);
+  };
+  const xFor = (minutes: number) => {
+    const inset = 6;
+    if (plotWidth <= inset * 2) return inset;
+    return inset + (minutes / DAY_MINUTES) * (plotWidth - inset * 2);
+  };
+  const coords =
+    plotWidth === 0
+      ? []
+      : samples.map((sample) => ({
+          x: xFor(minutesOfDay(sample.timestamp)),
+          y: yFor(sample.value),
+        }));
+
+  return (
+    <View style={styles.bpmScaleRow}>
+      <View style={styles.bpmAxis}>
+        {STRESS_TICKS.map((tick) => (
+          <Text key={tick} style={[styles.bpmTick, { top: yFor(tick) - 7 }]}>
+            {tick}
+          </Text>
+        ))}
+      </View>
+      <View style={styles.dayPlotColumn}>
+        <View style={styles.bpmPlot} onLayout={(event) => setPlotWidth(event.nativeEvent.layout.width)}>
+          {STRESS_TICKS.map((tick) => (
+            <View key={tick} style={[styles.bpmGrid, { top: yFor(tick) }]} />
+          ))}
+          {coords.slice(1).map((point, index) => {
+            const previous = coords[index];
+            if (!previous) return null;
+            const dx = point.x - previous.x;
+            const dy = point.y - previous.y;
+            const length = Math.hypot(dx, dy);
+            const angle = (Math.atan2(dy, dx) * 180) / Math.PI;
+            return (
+              <View
+                key={`line-${index}`}
+                style={[
+                  styles.bpmSegment,
+                  {
+                    left: (previous.x + point.x) / 2 - length / 2,
+                    top: (previous.y + point.y) / 2 - 1,
+                    width: length,
+                    transform: [{ rotate: `${angle}deg` }],
+                  },
+                ]}
+              />
+            );
+          })}
+          {coords.map((point, index) => {
+            const latest = index === coords.length - 1;
+            const size = latest ? 12 : 8;
+            return (
+              <View
+                key={`node-${index}`}
+                style={[
+                  styles.bpmNode,
+                  latest && styles.bpmNodeLatest,
+                  { height: size, left: point.x - size / 2, top: point.y - size / 2, width: size },
+                ]}
+              />
+            );
+          })}
+        </View>
+        <View style={styles.dayHours}>
+          {plotWidth === 0
+            ? null
+            : DAY_HOURS.map((hour) => (
+                <Text key={hour} style={[styles.dayHour, { left: Math.max(0, xFor(hour * 60) - 12) }]}>
+                  {hourLabel(hour)}
+                </Text>
+              ))}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+function minutesOfDay(timestamp: string): number {
+  const date = new Date(timestamp);
+  return date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
+}
+
+function hourLabel(hour: number): string {
+  if (hour === 0) return '12a';
+  if (hour === 12) return '12p';
+  if (hour < 12) return `${hour}a`;
+  return `${hour - 12}p`;
+}
+
 function baselineLine(summary: StressSummary): string | null {
   const parts: string[] = [];
   if (summary.week) {
@@ -693,6 +793,20 @@ const styles = StyleSheet.create({
   bpmPlot: {
     flex: 1,
     height: CHART_HEIGHT,
+  },
+  dayPlotColumn: {
+    flex: 1,
+    gap: 4,
+  },
+  dayHours: {
+    height: 16,
+  },
+  dayHour: {
+    color: colors.muted,
+    fontSize: 11,
+    position: 'absolute',
+    top: 0,
+    width: 28,
   },
   bpmGrid: {
     backgroundColor: colors.line,

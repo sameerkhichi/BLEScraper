@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { activityForLocalDay, stressSummary, type MetricSample, type SleepNight, type StepSample } from './model';
+import {
+  activityForLocalDay,
+  stressHistoryDays,
+  stressSummary,
+  type MetricSample,
+  type SleepNight,
+  type StepSample,
+} from './model';
 
 function slot(timestamp: string, steps: number, calories: number, distanceMeters: number): StepSample {
   return { timestamp, steps, calories, distanceMeters };
@@ -153,6 +160,44 @@ test('stress summary waits for enough earlier days before showing a baseline', (
   const month = stressSummary(earlier, [], now);
   assert.deepEqual(month.week, { value: 40, days: 7 });
   assert.deepEqual(month.month, { value: 40, days: 8 });
+});
+
+test('stress history keeps daytime samples and reports average, peak, and minimum', () => {
+  const sleep = [night(localIso(2026, 11, 7, 23), localIso(2026, 11, 8, 7))];
+  const samples = [
+    stress(localIso(2026, 11, 7, 15), 22),
+    stress(localIso(2026, 11, 7, 23, 30), 70),
+    stress(localIso(2026, 11, 8, 1), 30),
+    stress(localIso(2026, 11, 8, 2), 50),
+    stress(localIso(2026, 11, 8, 7), 10),
+    stress(localIso(2026, 11, 8, 10), 20),
+    stress(localIso(2026, 11, 8, 11), 40),
+    stress(localIso(2026, 11, 8, 16), 80),
+    stress(localIso(2026, 11, 8, 17), 90),
+    stress(localIso(2026, 11, 8, 12), 0),
+    stress(localIso(2026, 11, 8, 13), 100),
+  ];
+
+  const days = stressHistoryDays(samples, sleep);
+
+  assert.deepEqual(
+    days.map((day) => day.key),
+    ['2026-11-07', '2026-11-08'],
+  );
+  assert.deepEqual(days[0], {
+    key: '2026-11-07',
+    average: 22,
+    peak: 22,
+    minimum: 22,
+    samples: [stress(localIso(2026, 11, 7, 15), 22)],
+  });
+  assert.equal(days[1].average, 48);
+  assert.equal(days[1].peak, 90);
+  assert.equal(days[1].minimum, 10);
+  assert.deepEqual(
+    days[1].samples.map((sample) => sample.value),
+    [10, 20, 40, 80, 90],
+  );
 });
 
 function calendarDay(date: Date, utc: boolean): string {

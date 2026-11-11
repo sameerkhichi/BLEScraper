@@ -130,6 +130,22 @@ export type StressSummary = {
   overnight: number | null;
 };
 
+export type StressHistoryDay = {
+  key: string;
+  average: number;
+  peak: number;
+  minimum: number;
+  samples: MetricSample[];
+};
+
+// Local calendar day, so a history cell matches the phone's day rather than UTC.
+export function stressDayKey(date: Date): string | null {
+  if (Number.isNaN(date.getTime())) return null;
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
 // Labels for the ring's own 0–99 estimate. They are not the ring's categories.
 export function stressBand(value: number): StressBand {
   if (value <= 24) return 'Relaxed';
@@ -140,12 +156,7 @@ export function stressBand(value: number): StressBand {
 
 // Daytime samples are the ones outside every sleep window. Overnight stays separate.
 export function stressSummary(samples: MetricSample[], sleep: SleepNight[], now = new Date()): StressSummary {
-  const usable = samples
-    .filter((sample) => {
-      const time = Date.parse(sample.timestamp);
-      return Number.isFinite(time) && sample.value >= 1 && sample.value <= 99;
-    })
-    .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  const usable = usableStress(samples);
   const today = usable.filter(
     (sample) => isSameLocalDay(sample.timestamp, now) && !insideSleep(sleep, Date.parse(sample.timestamp)),
   );
@@ -164,6 +175,42 @@ export function stressSummary(samples: MetricSample[], sleep: SleepNight[], now 
     month: stressBaseline(usable, sleep, now, 30, 8),
     overnight: overnightAverage(usable, sleep),
   };
+}
+
+// One row per local day that has daytime samples. Days the phone never stored are absent.
+export function stressHistoryDays(samples: MetricSample[], sleep: SleepNight[]): StressHistoryDay[] {
+  const grouped = new Map<string, MetricSample[]>();
+  for (const sample of usableStress(samples)) {
+    const time = Date.parse(sample.timestamp);
+    if (insideSleep(sleep, time)) continue;
+    const key = stressDayKey(new Date(time));
+    if (!key) continue;
+    const existing = grouped.get(key);
+    if (existing) existing.push(sample);
+    else grouped.set(key, [sample]);
+  }
+
+  return [...grouped.entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([key, daySamples]) => {
+      const values = daySamples.map((sample) => sample.value);
+      return {
+        key,
+        average: Math.round(mean(values)),
+        peak: Math.max(...values),
+        minimum: Math.min(...values),
+        samples: daySamples,
+      };
+    });
+}
+
+function usableStress(samples: MetricSample[]): MetricSample[] {
+  return samples
+    .filter((sample) => {
+      const time = Date.parse(sample.timestamp);
+      return Number.isFinite(time) && sample.value >= 1 && sample.value <= 99;
+    })
+    .sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
 function distribution(today: MetricSample[]): StressDistribution {

@@ -6,8 +6,6 @@ Ring: Colmi R09
 
 Todo:
 
-- Phone app scaffold is in the repo root (Expo SDK 58, TypeScript).
-- Setup and the one-time Apple/Expo steps are in docs/setup.txt.
 
 ------------------------------------------------------------------------------------------
 
@@ -52,6 +50,8 @@ That wake reads about 7 days of stored heart rate, steps, stress, and HRV, plus 
 
 The ring writes heart rate on the interval saved in its own settings: 5, 15, 30, or 60 minutes. The stored heart-rate log still has a slot every 5 minutes, so a longer interval leaves some slots empty. Blood oxygen, stress, and HRV follow the cadences the firmware chooses. SpO2 and temperature come back as half-hour slots in vitalSpots. The phone keeps about 10 days of these spots. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted. A phone that is powered off cannot download them, because Bluetooth is off. A download does not change these settings.
 
+Confirmed through observation the ring does check heart rate every 5 minutes flat XX:05, XX:10 and so on. The red light for blood oxygen level does turn on hourly at XX:32. These times could change but they do indeed trigger. HRV, Step, calories, stress, distance all are also read on the ring confirmed through packets.
+
 Leaving the app open does not start extra sensor checks. Opening the app runs a download when one is due. The Measure buttons still run only when tapped.
 
 Sleep on the phone
@@ -93,6 +93,8 @@ The Stress card, above Sleep, uses the same daytime samples. It draws them in ti
 A 7-day average of earlier daytime samples appears once two earlier days exist. It says how many days it used when that is under 7. A 30-day average appears once 8 earlier days exist. The ring keeps about a week, so the longer average only fills in as the phone keeps older samples.
 
 Overnight is the average of samples inside the latest sleep window. It is labeled Overnight and is not given a stress band. A higher overnight reading is kept apart from the daytime number.
+
+Stress history opens from the Stress card. It shows one month at a time, Sunday through Saturday. Each day with daytime samples shows that day's average, colored by the same bands, with the peak and the minimum under it. Previous and next month, and previous and next year, move the grid. Next month and next year stop at the current month. A day opens the samples the phone saved for that local day, drawn from midnight to midnight. Days with no daytime sample stay empty. The ring still keeps about a week, so a day only appears after the phone has stored it. The history reads the saved stress array and does not download older logs or change the upload.
 
 Body temperature
 

@@ -279,6 +279,7 @@ export default function HomeScreen() {
             onPress={() => void measureStressReading()}
             tone="secondary"
           />
+          <Button label="Stress history" onPress={() => router.push('/stress')} tone="secondary" />
         </Card>
 
         <Card>

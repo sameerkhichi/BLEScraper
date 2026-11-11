@@ -38,6 +38,8 @@ export default function RootLayout() {
         <Stack.Screen name="scan" options={{ title: 'Choose ring' }} />
         <Stack.Screen name="motion" options={{ title: 'Accelerometer' }} />
         <Stack.Screen name="sleep" options={{ title: 'Sleep' }} />
+        <Stack.Screen name="stress" options={{ title: 'Stress history' }} />
+        <Stack.Screen name="stress-day" options={{ title: 'Stress' }} />
         <Stack.Screen name="controls" options={{ title: 'Settings' }} />
         <Stack.Screen name="settings" options={{ title: 'API settings' }} />
         <Stack.Screen name="queue" options={{ title: 'Waiting to send' }} />
