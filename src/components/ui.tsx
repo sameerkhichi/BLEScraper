@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View, type StyleProp, type ViewStyle } from 'react-native';
 
 export const colors = {
   bg: '#000000',
@@ -13,8 +13,8 @@ export const colors = {
   ok: '#3ddc84',
 };
 
-export function Card({ children }: { children: ReactNode }) {
-  return <View style={styles.card}>{children}</View>;
+export function Card({ children, style }: { children: ReactNode; style?: StyleProp<ViewStyle> }) {
+  return <View style={[styles.card, style]}>{children}</View>;
 }
 
 export function Button({

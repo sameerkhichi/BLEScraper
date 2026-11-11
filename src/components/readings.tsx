@@ -5,7 +5,6 @@ import {
   activityForLocalDay,
   latestMetric,
   stressBand,
-  stressSummary,
   type MetricSample,
   type SleepNight,
   type SleepStageName,
@@ -108,13 +107,12 @@ export function ActivityChart({
   sleep?: SleepNight[];
 }) {
   const today = activityForLocalDay(steps);
-  const summary = stressSummary(stress, sleep);
   const latestStress = latestMetric(stress);
   const night = latestNight(sleep);
   const quality = night ? scoreSleepNight(night) : null;
 
   return (
-    <View style={styles.block}>
+    <View style={styles.activityBlock}>
       <Text style={styles.label}>Today</Text>
       <View style={styles.activityRow}>
         <ActivityStat
@@ -139,7 +137,6 @@ export function ActivityChart({
           value={quality ? `${quality.score}` : '—'}
         />
       </View>
-      <Text style={[styles.meta, styles.stressLine]}>{stressContext(summary)}</Text>
     </View>
   );
 }
@@ -164,14 +161,9 @@ function ActivityStat({
       </View>
       <Text style={styles.caption}>{caption}</Text>
       <Text style={styles.activityIcon}>{icon}</Text>
-      <Text style={styles.meta}>{label}</Text>
+      <Text style={styles.activityLabel}>{label}</Text>
     </View>
   );
-}
-
-function stressContext(summary: StressSummary): string {
-  if (summary.average === null || summary.peak === null) return 'No daytime stress yet.';
-  return `Today ${summary.average} · peak ${summary.peak}`;
 }
 
 const STRESS_TICKS = [100, 75, 50, 25, 0];
@@ -721,21 +713,21 @@ const styles = StyleSheet.create({
   },
   caption: {
     color: colors.muted,
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  activityBlock: {
+    gap: 4,
   },
   activityRow: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 10,
     justifyContent: 'space-evenly',
-  },
-  stressLine: {
-    textAlign: 'center',
   },
   activityStat: {
     alignItems: 'center',
     flex: 1,
-    gap: 6,
+    gap: 2,
   },
   activityCircle: {
     alignItems: 'center',
@@ -744,22 +736,27 @@ const styles = StyleSheet.create({
     backgroundColor: colors.bg,
     borderColor: colors.accent,
     borderRadius: 999,
-    borderWidth: 3,
+    borderWidth: 2,
     justifyContent: 'center',
-    maxWidth: 148,
-    paddingHorizontal: 12,
+    maxWidth: 96,
+    paddingHorizontal: 6,
     width: '100%',
   },
   activityValue: {
     color: colors.text,
-    fontSize: 28,
+    fontSize: 18,
     fontVariant: ['tabular-nums'],
     fontWeight: '700',
     textAlign: 'center',
   },
   activityIcon: {
-    fontSize: 28,
-    lineHeight: 34,
+    fontSize: 16,
+    lineHeight: 20,
+  },
+  activityLabel: {
+    color: colors.muted,
+    fontSize: 12,
+    lineHeight: 16,
   },
   scaleRow: {
     flexDirection: 'row',

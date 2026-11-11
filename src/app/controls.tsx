@@ -4,16 +4,7 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 import { HEART_RATE_INTERVALS, hasPendingFirmware } from '../ble/ringSettings';
 import { Button, colors } from '../components/ui';
 import { shownChecks, shownGesture } from '../model';
-import { LOW_BATTERY_PERCENT, LOW_BATTERY_REMIND_HOURS } from '../sync/batteryAlert';
 import { CATCHUP_HOURS } from '../sync/schedule';
-import {
-  FEVER_C,
-  MILD_HYPOTHERMIA_C,
-  MODERATE_HYPOTHERMIA_C,
-  SEVERE_HYPOTHERMIA_C,
-  TEMP_ALERT_REMIND_HOURS,
-  fahrenheit,
-} from '../sync/temperatureAlert';
 import { useAppState } from '../state/AppProvider';
 
 export default function ControlsScreen() {
@@ -93,12 +84,6 @@ export default function ControlsScreen() {
           value={autoSync}
         />
       </View>
-      <Text style={styles.body}>
-        The phone notifies you when the ring battery is below {LOW_BATTERY_PERCENT}%. It notifies again if the level drops, and every {LOW_BATTERY_REMIND_HOURS} hours while it stays that low.
-      </Text>
-      <Text style={styles.body}>
-        Body temperature notifies at {FEVER_C}°C ({fahrenheit(FEVER_C).toFixed(1)}°F) or higher, and when it falls below {MILD_HYPOTHERMIA_C}°C ({fahrenheit(MILD_HYPOTHERMIA_C).toFixed(0)}°F, mild), {MODERATE_HYPOTHERMIA_C}°C ({fahrenheit(MODERATE_HYPOTHERMIA_C).toFixed(1)}°F, moderate), or {SEVERE_HYPOTHERMIA_C}°C ({fahrenheit(SEVERE_HYPOTHERMIA_C).toFixed(1)}°F, severe). It notifies again when the reading crosses a worse line, and every {TEMP_ALERT_REMIND_HOURS} hours while it stays there.
-      </Text>
 
       <Text style={styles.label}>Factory gesture control</Text>
       {gesture === null ? (
@@ -121,14 +106,14 @@ export default function ControlsScreen() {
         />
       )}
       <Text style={styles.body}>
-        This switch is the on/off saved on the ring. A download does not change it, and disconnecting does not turn it off. What a wave does on the phone, such as skipping a song, comes from an iOS Bluetooth bond, not from this switch. Poses on the Accelerometer screen are recognized on the phone. If a song still skips with this off, forget the ring in Bluetooth Settings and do not tap Pair.
+        This switch is the on/off saved on the ring. If you need to change it, do it through QRing. That functionality is coming soon.
       </Text>
       {gestureNote ? <Text style={styles.body}>{gestureNote}</Text> : null}
 
       <Text style={styles.label}>Ring frequency checks</Text>
       <Text style={styles.body}>{firmwareLabel(settings.firmware.readAt, liveRead, pending)}</Text>
       <Text style={styles.body}>
-        Heart rate, blood oxygen, stress, and HRV are stored on the ring. They stay there with the power off, after the phone disconnects, and after Disconnect ring. Choosing the ring again reads them. The phone keeps the last successful read and does not write its own defaults over the ring. A download only reads logs.
+        Heart rate, blood oxygen, stress, and HRV are stored on the ring.
       </Text>
       <CheckRow
         disabled={busy}
