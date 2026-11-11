@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   activityForLocalDay,
   activityHistoryDays,
+  dropStoredRange,
   heartRateHistoryDays,
   latestHeartRate,
   latestMetric,
@@ -16,6 +17,7 @@ import {
   type MetricSample,
   type SleepNight,
   type StepSample,
+  type UploadPayload,
   type VitalSpot,
 } from './model';
 
@@ -333,6 +335,103 @@ test('latest vital skips a spot that is missing the field', () => {
   assert.deepEqual(latestVital(spots, 'spo2'), { value: 97, timestamp: '2026-11-08T12:00:00.000Z' });
   assert.deepEqual(latestVital(spots, 'bodyTemperatureC'), { value: 36.5, timestamp: '2026-11-08T13:00:00.000Z' });
   assert.equal(latestVital([], 'spo2'), null);
+});
+
+function stored(patch: Partial<UploadPayload> = {}): UploadPayload {
+  return {
+    source: 'colmi-r09',
+    syncedAt: '2026-11-08T00:00:00.000Z',
+    ring: { id: 'ring', name: 'R09' },
+    battery: { level: 80, charging: false },
+    realtimeHeartRate: 72,
+    realtimeHeartRateAt: '2026-11-08T18:00:00.000Z',
+    spo2: 98,
+    bodyTemperatureC: 37.1,
+    vitalSpots: [],
+    accelerometer: { x: 0.1, y: 0.2, z: 0.9, sampledAt: '2026-11-08T18:30:00.000Z' },
+    heartRate: [],
+    steps: [],
+    stress: [],
+    hrv: [],
+    sleep: [],
+    warnings: ['kept'],
+    ...patch,
+  };
+}
+
+test('drop stored range removes samples on the endpoints and keeps the ones outside', () => {
+  const start = Date.parse('2026-11-08T12:00:00.000Z');
+  const end = Date.parse('2026-11-08T13:00:00.000Z');
+  const dropped = dropStoredRange(
+    stored({
+      heartRate: [
+        { timestamp: '2026-11-08T11:59:00.000Z', bpm: 60 },
+        { timestamp: '2026-11-08T12:00:00.000Z', bpm: 70 },
+        { timestamp: '2026-11-08T13:00:00.000Z', bpm: 80 },
+        { timestamp: '2026-11-08T13:00:01.000Z', bpm: 90 },
+      ],
+      steps: [slot('2026-11-08T12:00:00.000Z', 10, 4, 8), slot('2026-11-08T14:00:00.000Z', 20, 8, 16)],
+      stress: [stress('2026-11-08T12:30:00.000Z', 40), stress('not-a-time', 11)],
+      hrv: [stress('2026-11-08T13:00:00.000Z', 50), stress('2026-11-08T15:00:00.000Z', 55)],
+    }),
+    start,
+    end,
+  );
+
+  assert.deepEqual(
+    dropped.payload.heartRate.map((sample) => sample.bpm),
+    [60, 90],
+  );
+  assert.deepEqual(
+    dropped.payload.steps.map((sample) => sample.steps),
+    [20],
+  );
+  assert.deepEqual(dropped.payload.stress, [stress('not-a-time', 11)]);
+  assert.deepEqual(dropped.payload.hrv, [stress('2026-11-08T15:00:00.000Z', 55)]);
+  assert.equal(dropped.payload.battery?.level, 80);
+  assert.deepEqual(dropped.payload.warnings, ['kept']);
+  assert.equal(dropped.payload.realtimeHeartRate, 72);
+  assert.equal(dropped.payload.spo2, 98);
+  assert.equal(dropped.payload.bodyTemperatureC, 37.1);
+  assert.equal(dropped.removedSamples, 5);
+  assert.equal(dropped.removedNights, 0);
+});
+
+test('drop stored range removes a sleep night that overlaps and keeps one outside', () => {
+  const start = Date.parse('2026-11-08T01:00:00.000Z');
+  const end = Date.parse('2026-11-08T02:00:00.000Z');
+  const outside = night('2026-11-06T23:00:00.000Z', '2026-11-07T07:00:00.000Z');
+  const overlapping = night('2026-11-07T23:00:00.000Z', '2026-11-08T07:00:00.000Z');
+  const dropped = dropStoredRange(stored({ sleep: [outside, overlapping] }), start, end);
+
+  assert.deepEqual(dropped.payload.sleep, [outside]);
+  assert.equal(dropped.removedNights, 1);
+});
+
+test('drop stored range follows the vital spots that remain', () => {
+  const start = Date.parse('2026-11-08T13:00:00.000Z');
+  const end = Date.parse('2026-11-08T13:00:00.000Z');
+  const dropped = dropStoredRange(
+    stored({
+      realtimeHeartRateAt: '2026-11-08T13:00:00.000Z',
+      accelerometer: { x: 0, y: 0, z: 1, sampledAt: '2026-11-08T13:00:00.000Z' },
+      vitalSpots: [
+        { timestamp: '2026-11-08T12:00:00.000Z', spo2: 97, bodyTemperatureC: 36.4 },
+        { timestamp: '2026-11-08T13:00:00.000Z', spo2: 98, bodyTemperatureC: 37.1 },
+        { timestamp: '2026-11-08T14:00:00.000Z', spo2: null, bodyTemperatureC: 36.2 },
+      ],
+    }),
+    start,
+    end,
+  );
+
+  assert.equal(dropped.payload.vitalSpots.length, 2);
+  assert.equal(dropped.payload.spo2, 97);
+  assert.equal(dropped.payload.bodyTemperatureC, 36.2);
+  assert.equal(dropped.payload.realtimeHeartRate, null);
+  assert.equal(dropped.payload.realtimeHeartRateAt, null);
+  assert.equal(dropped.payload.accelerometer, null);
+  assert.equal(dropped.removedSamples, 3);
 });
 
 test('latest metric returns the newest finite sample', () => {

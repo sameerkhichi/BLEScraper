@@ -16,6 +16,7 @@ import { clearRingServices, hydrateRingServices } from '../ble/ringServices';
 import { getBleManager } from '../ble/manager';
 import {
   clearPendingField,
+  dropStoredRange,
   keepSleepRecord,
   keepStoredSamples,
   mergeFirmwareRead,
@@ -67,6 +68,7 @@ type AppContextValue = {
   sendPending: () => Promise<void>;
   removePending: (id: string) => Promise<void>;
   clearPending: () => Promise<void>;
+  deleteStoredRange: (start: Date, end: Date) => Promise<{ removedSamples: number; removedNights: number }>;
   readRingFirmware: () => Promise<string>;
   writeRingField: (field: SettingField, patch: SettingPatch) => Promise<string>;
   applyRingChecks: () => Promise<string>;
@@ -575,6 +577,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [publishQueue],
   );
 
+  const deleteStoredRange = useCallback(
+    async (start: Date, end: Date) => {
+      return runWithQueue(async () => {
+        const previous = await loadLastPayload();
+        if (!previous) return { removedSamples: 0, removedNights: 0 };
+        const dropped = dropStoredRange(previous, start.getTime(), end.getTime());
+        if (dropped.removedSamples > 0 || dropped.removedNights > 0) await remember(dropped.payload);
+        return { removedSamples: dropped.removedSamples, removedNights: dropped.removedNights };
+      });
+    },
+    [remember],
+  );
+
   const clearPending = useCallback(async () => {
     const ids = (await loadQueue()).map((item) => item.id);
     if (ids.length === 0) return;
@@ -617,6 +632,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendPending,
       removePending,
       clearPending,
+      deleteStoredRange,
       readRingFirmware,
       writeRingField,
       applyRingChecks,
@@ -640,6 +656,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       sendPending,
       removePending,
       clearPending,
+      deleteStoredRange,
       readRingFirmware,
       writeRingField,
       applyRingChecks,

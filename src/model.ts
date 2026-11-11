@@ -656,6 +656,82 @@ function unionByTimestamp<T extends { timestamp: string }>(previous: T[], next: 
   return [...byTime.values()].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
 }
 
+export type StoredRangeDrop = {
+  payload: UploadPayload;
+  removedSamples: number;
+  removedNights: number;
+};
+
+function insideRange(timestamp: string | null | undefined, startMs: number, endMs: number): boolean {
+  const time = sampleTime(timestamp);
+  return time !== null && time >= startMs && time <= endMs;
+}
+
+function withoutRange<T extends { timestamp: string }>(
+  samples: T[] | null | undefined,
+  startMs: number,
+  endMs: number,
+): { kept: T[]; removed: number } {
+  const kept: T[] = [];
+  let removed = 0;
+  for (const sample of samples ?? []) {
+    if (insideRange(sample.timestamp, startMs, endMs)) removed += 1;
+    else kept.push(sample);
+  }
+  return { kept, removed };
+}
+
+function nightHitsRange(night: SleepNight, startMs: number, endMs: number): boolean {
+  const started = sampleTime(night.startedAt);
+  const ended = sampleTime(night.endedAt);
+  if (started === null && ended === null) return false;
+  if (started === null) return ended !== null && ended >= startMs && ended <= endMs;
+  if (ended === null) return started >= startMs && started <= endMs;
+  const nightStart = Math.min(started, ended);
+  const nightEnd = Math.max(started, ended);
+  return nightStart <= endMs && nightEnd >= startMs;
+}
+
+// Drops history records saved on the phone. The upload queue and the ring are left alone.
+export function dropStoredRange(payload: UploadPayload, startMs: number, endMs: number): StoredRangeDrop {
+  const heartRate = withoutRange(payload.heartRate, startMs, endMs);
+  const steps = withoutRange(payload.steps, startMs, endMs);
+  const stress = withoutRange(payload.stress, startMs, endMs);
+  const hrv = withoutRange(payload.hrv, startMs, endMs);
+  const vitalSpots = withoutRange(payload.vitalSpots, startMs, endMs);
+  const sleep: SleepNight[] = [];
+  let removedNights = 0;
+  for (const night of payload.sleep ?? []) {
+    if (nightHitsRange(night, startMs, endMs)) removedNights += 1;
+    else sleep.push(night);
+  }
+
+  const clearProbe = insideRange(payload.realtimeHeartRateAt, startMs, endMs);
+  const clearMotion = payload.accelerometer !== null && insideRange(payload.accelerometer.sampledAt, startMs, endMs);
+  const removedSamples =
+    heartRate.removed + steps.removed + stress.removed + hrv.removed + vitalSpots.removed + (clearProbe ? 1 : 0) + (clearMotion ? 1 : 0);
+
+  return {
+    removedSamples,
+    removedNights,
+    payload: {
+      ...payload,
+      realtimeHeartRate: clearProbe ? null : payload.realtimeHeartRate,
+      realtimeHeartRateAt: clearProbe ? null : payload.realtimeHeartRateAt,
+      spo2: vitalSpots.removed > 0 ? latestVital(vitalSpots.kept, 'spo2')?.value ?? null : payload.spo2,
+      bodyTemperatureC:
+        vitalSpots.removed > 0 ? latestVital(vitalSpots.kept, 'bodyTemperatureC')?.value ?? null : payload.bodyTemperatureC,
+      vitalSpots: vitalSpots.kept,
+      accelerometer: clearMotion ? null : payload.accelerometer,
+      heartRate: heartRate.kept,
+      steps: steps.kept,
+      stress: stress.kept,
+      hrv: hrv.kept,
+      sleep,
+    },
+  };
+}
+
 // Sleep can arrive without a new heart-rate or step log. Keep the samples already stored.
 export function keepSleepRecord(previous: UploadPayload | null, incoming: UploadPayload): UploadPayload {
   if (!previous) return incoming;

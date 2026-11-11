@@ -1,14 +1,60 @@
 import { router } from 'expo-router';
-import { ScrollView, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useRingServices } from '../ble/ringServices';
 import { Button, Card, colors } from '../components/ui';
 import { useAppState } from '../state/AppProvider';
 
+function parseWhen(dateText: string, timeText: string, blankTime: string): Date | null {
+  const dateMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateText.trim());
+  const timeMatch = /^(\d{2}):(\d{2})$/.exec(timeText.trim() || blankTime);
+  if (!dateMatch || !timeMatch) return null;
+  const year = Number(dateMatch[1]);
+  const month = Number(dateMatch[2]);
+  const day = Number(dateMatch[3]);
+  const hour = Number(timeMatch[1]);
+  const minute = Number(timeMatch[2]);
+  if (month < 1 || month > 12 || hour > 23 || minute > 59) return null;
+  const parsed = new Date(year, month - 1, day, hour, minute, 0, 0);
+  if (
+    parsed.getFullYear() !== year ||
+    parsed.getMonth() !== month - 1 ||
+    parsed.getDate() !== day ||
+    parsed.getHours() !== hour ||
+    parsed.getMinutes() !== minute
+  ) {
+    return null;
+  }
+  return parsed;
+}
+
+function formatWhen(date: Date): string {
+  return date.toLocaleString([], {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+function removedLine(removedSamples: number, removedNights: number): string {
+  if (removedSamples === 0 && removedNights === 0) return 'Nothing saved in that range.';
+  const samples = `${removedSamples} sample${removedSamples === 1 ? '' : 's'}`;
+  const nights = `${removedNights} sleep night${removedNights === 1 ? '' : 's'}`;
+  return `Removed ${samples} and ${nights}.`;
+}
+
 export default function ConfigScreen() {
   const ringServices = useRingServices();
-  const { busy, settings, queue, lastPayload, sync, sendPending, forgetRing } = useAppState();
+  const { busy, settings, queue, lastPayload, sync, sendPending, forgetRing, deleteStoredRange } = useAppState();
+  const [startDate, setStartDate] = useState('');
+  const [startTime, setStartTime] = useState('');
+  const [endDate, setEndDate] = useState('');
+  const [endTime, setEndTime] = useState('');
+  const [notice, setNotice] = useState<string | null>(null);
   const insets = useSafeAreaInsets();
   const waiting = queue.length > 0;
   const ringLabel = settings.ringName || settings.ringId || 'No ring selected';
@@ -20,6 +66,45 @@ export default function ConfigScreen() {
       return;
     }
     void sync();
+  };
+
+  const edit = (set: (value: string) => void) => (value: string) => {
+    setNotice(null);
+    set(value);
+  };
+
+  const askDelete = () => {
+    const start = parseWhen(startDate, startTime, '00:00');
+    const end = parseWhen(endDate, endTime, '23:59');
+    if (!start || !end) {
+      setNotice('Enter a start and end as YYYY-MM-DD and HH:mm.');
+      return;
+    }
+    if (start.getTime() > end.getTime()) {
+      setNotice('Start has to be before the end.');
+      return;
+    }
+    if (!lastPayload) {
+      setNotice('Nothing is saved on the phone yet.');
+      return;
+    }
+    setNotice(null);
+    Alert.alert(
+      'Delete saved history?',
+      `Heart rate, steps, stress, HRV, blood oxygen, temperature, and sleep from ${formatWhen(start)} to ${formatWhen(end)} will be removed. Readings waiting to send stay.`,
+      [
+        { text: 'Keep', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => {
+            void deleteStoredRange(start, end).then((result) => {
+              setNotice(removedLine(result.removedSamples, result.removedNights));
+            });
+          },
+        },
+      ],
+    );
   };
 
   return (
@@ -68,6 +153,62 @@ export default function ConfigScreen() {
         {waiting ? null : (
           <Button disabled label="Send waiting readings" onPress={() => void sendPending()} tone="secondary" />
         )}
+
+        <Card>
+          <Text style={styles.label}>Saved history</Text>
+          <Text style={styles.meta}>
+            Removes saved heart rate, steps, stress, HRV, blood oxygen, temperature, and sleep in this range. Readings
+            waiting to send stay on the phone.
+          </Text>
+          <Text style={styles.label}>Start</Text>
+          <View style={styles.row}>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={edit(setStartDate)}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.muted}
+              style={[styles.input, styles.date]}
+              value={startDate}
+            />
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={edit(setStartTime)}
+              placeholder="00:00"
+              placeholderTextColor={colors.muted}
+              style={[styles.input, styles.time]}
+              value={startTime}
+            />
+          </View>
+          <Text style={styles.label}>End</Text>
+          <View style={styles.row}>
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={edit(setEndDate)}
+              placeholder="YYYY-MM-DD"
+              placeholderTextColor={colors.muted}
+              style={[styles.input, styles.date]}
+              value={endDate}
+            />
+            <TextInput
+              autoCapitalize="none"
+              autoCorrect={false}
+              onChangeText={edit(setEndTime)}
+              placeholder="23:59"
+              placeholderTextColor={colors.muted}
+              style={[styles.input, styles.time]}
+              value={endTime}
+            />
+          </View>
+          {notice ? <Text style={styles.meta}>{notice}</Text> : null}
+          <Button disabled={busy} label="Delete saved history" onPress={askDelete} tone="danger" />
+          <Text style={styles.meta}>
+            Dates are YYYY-MM-DD and times are HH:mm, in local time. A blank start time means 00:00. A blank end time
+            means 23:59.
+          </Text>
+        </Card>
       </ScrollView>
 
       {waiting ? (
@@ -115,6 +256,26 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 14,
     lineHeight: 20,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  input: {
+    backgroundColor: colors.bg,
+    borderColor: colors.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    color: colors.text,
+    fontSize: 16,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  date: {
+    flex: 1.4,
+  },
+  time: {
+    flex: 1,
   },
   services: {
     color: colors.muted,
