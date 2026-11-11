@@ -1,10 +1,11 @@
 import { router } from 'expo-router';
 import { useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useRingServices } from '../ble/ringServices';
 import { Button, Card, colors } from '../components/ui';
+import type { ProcessedWindow, UploadMode } from '../model';
 import { useAppState } from '../state/AppProvider';
 
 function parseWhen(dateText: string, timeText: string, blankTime: string): Date | null {
@@ -49,7 +50,7 @@ function removedLine(removedSamples: number, removedNights: number): string {
 
 export default function ConfigScreen() {
   const ringServices = useRingServices();
-  const { busy, settings, queue, lastPayload, sync, sendPending, forgetRing, deleteStoredRange } = useAppState();
+  const { busy, settings, queue, lastPayload, sync, sendPending, forgetRing, deleteStoredRange, saveAppSettings } = useAppState();
   const [startDate, setStartDate] = useState('');
   const [startTime, setStartTime] = useState('');
   const [endDate, setEndDate] = useState('');
@@ -146,6 +147,37 @@ export default function ConfigScreen() {
           <Text style={styles.meta}>
             {queue.length === 0 ? 'Nothing waiting to send.' : `${queue.length} reading${queue.length === 1 ? '' : 's'} waiting.`}
           </Text>
+          <Text style={styles.meta}>Send</Text>
+          <ChoiceRow
+            onChange={(uploadMode) => void saveAppSettings({ ...settings, uploadMode })}
+            options={[
+              { value: 'raw', label: 'Raw' },
+              { value: 'processed', label: 'Processed' },
+              { value: 'both', label: 'Both' },
+            ]}
+            value={settings.uploadMode}
+          />
+          <Text style={styles.meta}>
+            {settings.uploadMode === 'raw'
+              ? 'Raw sends the sample JSON the phone already posts.'
+              : settings.uploadMode === 'processed'
+                ? 'Processed sends averages, scores, and debts for the window below.'
+                : 'Both sends the sample JSON plus averages, scores, and debts.'}
+          </Text>
+          {settings.uploadMode === 'raw' ? null : (
+            <>
+              <Text style={styles.meta}>Processed window</Text>
+              <ChoiceRow
+                onChange={(processedWindow) => void saveAppSettings({ ...settings, processedWindow })}
+                options={[
+                  { value: 'day', label: 'Today' },
+                  { value: 'week', label: 'This week' },
+                  { value: 'all', label: 'All' },
+                ]}
+                value={settings.processedWindow}
+              />
+            </>
+          )}
           <Button label="View waiting readings" onPress={() => router.push('/queue')} tone="secondary" />
           <Button label="API settings" onPress={() => router.push('/settings')} tone="secondary" />
         </Card>
@@ -220,6 +252,35 @@ export default function ConfigScreen() {
   );
 }
 
+function ChoiceRow<T extends UploadMode | ProcessedWindow>({
+  options,
+  value,
+  onChange,
+}: {
+  options: { value: T; label: string }[];
+  value: T;
+  onChange: (value: T) => void;
+}) {
+  return (
+    <View style={styles.choices}>
+      {options.map((option) => {
+        const selected = option.value === value;
+        return (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityState={{ selected }}
+            key={option.value}
+            onPress={() => onChange(option.value)}
+            style={[styles.choice, selected && styles.choiceSelected]}
+          >
+            <Text style={[styles.choiceLabel, selected && styles.choiceLabelSelected]}>{option.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   screen: {
     backgroundColor: colors.bg,
@@ -281,5 +342,30 @@ const styles = StyleSheet.create({
     color: colors.muted,
     fontSize: 11,
     lineHeight: 15,
+  },
+  choices: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  choice: {
+    alignItems: 'center',
+    borderColor: colors.line,
+    borderRadius: 14,
+    borderWidth: 1,
+    flex: 1,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  choiceSelected: {
+    backgroundColor: colors.accent,
+    borderColor: colors.accent,
+  },
+  choiceLabel: {
+    color: colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  choiceLabelSelected: {
+    color: colors.accentText,
   },
 });

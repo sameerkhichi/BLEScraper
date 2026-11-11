@@ -25,6 +25,19 @@ export const defaultRingChecks: RingChecks = {
   hrv: true,
 };
 
+export type UploadMode = 'raw' | 'processed' | 'both';
+export type ProcessedWindow = 'day' | 'week' | 'all';
+
+export function uploadModeFrom(value: unknown): UploadMode {
+  if (value === 'raw' || value === 'processed' || value === 'both') return value;
+  return 'raw';
+}
+
+export function processedWindowFrom(value: unknown): ProcessedWindow {
+  if (value === 'day' || value === 'week' || value === 'all') return value;
+  return 'all';
+}
+
 export type AppSettings = {
   apiUrl: string;
   apiKey: string;
@@ -36,6 +49,8 @@ export type AppSettings = {
   ringChecks: RingChecks;
   firmware: FirmwareRead;
   pendingFirmware: PendingFirmware;
+  uploadMode: UploadMode;
+  processedWindow: ProcessedWindow;
 };
 
 export type BatteryReading = {
@@ -778,6 +793,8 @@ export const defaultSettings: AppSettings = {
   ringChecks: defaultRingChecks,
   firmware: emptyFirmware(),
   pendingFirmware: emptyPending(),
+  uploadMode: 'raw',
+  processedWindow: 'all',
 };
 
 export function checksFromFirmware(previous: RingChecks, read: FirmwareRead): RingChecks {

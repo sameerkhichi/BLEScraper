@@ -8,7 +8,9 @@ import {
   isMetricSample,
   isSleepNight,
   isVitalSpot,
+  processedWindowFrom,
   RING_HEART_RATE_MINUTES,
+  uploadModeFrom,
   type AppSettings,
   type RingChecks,
   type UploadPayload,
@@ -36,6 +38,8 @@ export async function loadSettings(): Promise<AppSettings> {
     ringChecks: ringChecksFrom(parsed.ringChecks),
     firmware: firmwareFrom(parsed.firmware),
     pendingFirmware: pendingFrom(parsed.pendingFirmware),
+    uploadMode: uploadModeFrom(parsed.uploadMode),
+    processedWindow: processedWindowFrom(parsed.processedWindow),
   };
 }
 

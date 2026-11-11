@@ -6,10 +6,11 @@ This app runs on an iPhone. It reads the Colmi R09 over unencrypted BLE GATT, ke
 The iOS binary is built in the cloud with EAS, uploaded to App Store Connect, and attached to the TestFlight group named Internal. GitHub Actions does that on every push to main that changes code, and again on the 1st of every other month so the TestFlight build is refreshed before the 90-day expiry. GitHub's scheduler has no "every 60 days" interval, so every other month is the schedule.
 
 FOR API/IP FORWARDING USAGE.
-The Arduino URL, entered in the app under Settings. 
+The Arduino URL, entered in the app under Settings.
 Example: http://203.0.113.10:8080/ingest
    The phone allows plain HTTP because the home server is not required to have a certificate.
    Optional API key is sent as the X-Api-Key header.
+   Config, on the Arduino card, chooses Raw, Processed, or Both. Raw is the sample JSON below. Processed sends the averages, scores, and debts. Both sends the sample JSON and that summary. Today, This week, and All limit the summary. The field list is in docs/BLEScraper.txt under Sending to the Arduino IP.
 
 
 Install
@@ -63,7 +64,7 @@ Scheduled runs only happen from the default branch, which is main.
 What the phone sends
 --------------------
 
-POST the saved API URL with Content-Type application/json.
+POST the saved API URL with Content-Type application/json. The Arduino card chooses Raw, Processed, or Both. Raw is the body below. Processed and Both are described in docs/BLEScraper.txt. A URL has to start with http:// or https://, including an IP address. A blank URL or a failed response keeps the reading on the phone.
 
     {
       "source": "colmi-r09",

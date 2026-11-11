@@ -20,7 +20,7 @@ Notes
 - The body-temperature card and a phone notification use the same lines. Fever is 38°C (100.4°F) or higher. Below 35°C (95°F) is mild hypothermia, below 32°C (89.6°F) is moderate, and below 28°C (82.4°F) is severe. 35.0°C through 37.9°C stays normal. The rules are under Body temperature.
 - Those controls are on the Settings screen at the top right of the home screen. Opening Settings reads the ring. Changing one control writes that field, then reads it back. If the ring is away, the screen shows the last read and the time. Write changes to the ring sends only the fields that were changed. An older ring that ignores HRV keeps the other three, and HRV is not written when the read fails.
 - While the app is open, nothing cycles the sensor. The only automatic phone cycle is the download of data the ring already stored, about every 4 hours, or once when the app is opened and a download is already due. The Measure buttons run only when tapped. A download holds the radio for a short read, then disconnects, and the ring continues. iOS will not wake the app after it is swiped away.
-- The sleep score and sleep debt are estimated on the phone from the stages. The ring does not send them. The upload adds them to each night. The calculation is under Sleep score.
+- The sleep score and sleep debt are estimated on the phone from the stages. The ring does not send them. Raw and Both add them to each night. Processed puts them on the nights inside processed.sleep. The calculation is under Sleep score.
 - Heart rate, blood oxygen, body temperature, and stress update from the newest saved sample after a download. Measure is not required. The Taken time is that sample's timestamp. A newer Measure still wins until a later stored sample arrives. Heart rate compares the last heartRate sample with realtimeHeartRate and realtimeHeartRateAt. A log download leaves realtimeHeartRate empty, and a merge keeps the previous probe, so the card does not read that field alone. The idle heart-rate graph is the stored 5-minute log. A live Measure draws its own trace, and that trace is dropped when the session stops. Blood oxygen and temperature come from the newest vitalSpots entry that has that field. The spo2 and bodyTemperatureC numbers on the snapshot are only the newest spot from the last download, so they can disagree with the spots the phone kept. The phone notification still uses bodyTemperatureC, not the spot the card shows. The stress number on the Stress card and the Today circle is the last stress sample, including overnight samples and samples from an earlier day. It is the ring's own 0–99 estimate. The phone does not invent one from heart rate. The stress graph is that stored series. Today average, peak, high time, band shares, and trend stay daytime-only. The line under the Today circles stays today's daytime average and peak. The bands and the day summary are under Stress score.
 - Will allow for HTTP/JSON communication with an API.
 - EAS Build will upload the ipa build to app store connect
@@ -79,11 +79,11 @@ If the last stage that is not trailing awake time is deep, the phone subtracts 5
 
 Sleep debt uses 8 hours as the need. Nights are walked from oldest startedAt to newest, including nights the ring has already dropped and the phone kept. Each night adds minutesAsleep minus 480. Extra sleep pays the balance down, and the balance never goes above 0, so a long night does not create a credit. sleepDebtMinutes on a night is the minutes still owed after that night. The home sleep card and the newest history card show that balance. 0 is "No sleep debt."
 
-The upload stamps score, scoreLabel, endedInDeepSleep, and sleepDebtMinutes onto each night at send time, including a body that was already waiting in the queue. A live reading that sends "sleep": [] stays an empty list. Solloid can read the newest night's sleepDebtMinutes as the balance on the card.
+Raw and Both stamp score, scoreLabel, endedInDeepSleep, and sleepDebtMinutes onto each night at send time, including a body that was already waiting in the queue. A live reading that sends "sleep": [] stays an empty list. Solloid can read the newest night's sleepDebtMinutes as the balance on the card. Processed puts those same fields on the nights inside processed.sleep and leaves the sample arrays out. Debt is still walked across every stored night, so a night inside a Today or This week window keeps the balance the card shows.
 
 Stress score
 
-The ring stores its own stress estimate, from 1 to 99, about every 30 minutes. Command 0x37 downloads that history. Command 0x36 turns the logging on and off with the other automatic checks. Measure stress asks for one live reading with command 0x69, sensor type 0x08, and the phone saves that sample with the time it was taken. Zero and anything over 99 are ignored. The raw samples are the stress array in the JSON. The averages, bands, and trend are not stored as their own fields.
+The ring stores its own stress estimate, from 1 to 99, about every 30 minutes. Command 0x37 downloads that history. Command 0x36 turns the logging on and off with the other automatic checks. Measure stress asks for one live reading with command 0x69, sensor type 0x08, and the phone saves that sample with the time it was taken. Zero and anything over 99 are ignored. The raw samples are the stress array in the JSON. The averages, bands, and trend are not stored as their own fields. Processed and Both add them under processed.stress when the reading is posted.
 
 These bands are labels in the app. They are not a confirmed QRing scale, and a 50 here is not a 50 on another device. 0–24 is Relaxed. 25–49 is Low. 50–74 is Moderate. 75–99 is High.
 
@@ -109,7 +109,7 @@ The card shows the newest saved finger reading in °C, with Fahrenheit and the s
 
 A Measure tap or a background sync notifies from that latest reading. The first time it crosses a line, the phone notifies. A worse line notifies again right away. The same stage waits 4 hours, then reminds. A normal reading clears the notice. Opening the app uses the saved reading the same way. A sync that does not include a temperature leaves the last notice alone.
 
-The titles are "Body temperature is high", "Body temperature is low", "Body temperature is very low", and "Body temperature is dangerously low". Android posts these on a Body temperature channel. The stage is not its own JSON field. The upload still sends bodyTemperatureC.
+The titles are "Body temperature is high", "Body temperature is low", "Body temperature is very low", and "Body temperature is dangerously low". Android posts these on a Body temperature channel. The stage is not its own JSON field. Raw and Both still send bodyTemperatureC. Processed sends the day's average, peak, and minimum under processed.temperature.
 
 Ring storage
 
@@ -123,7 +123,7 @@ Steps, calories, and distance are one 15-minute block. They stay, with no age cu
 
 Duplicates
 
-The phone merges heart rate, steps, stress, and vital spots by timestamp, and sleep by startedAt, so the saved reading does not grow a second copy of the same minute or the same night. The API still receives a whole snapshot whenever any sample is new, so the same minute can be posted again inside the next body. That snapshot can now be older than the week still on the ring.
+The phone merges heart rate, steps, stress, and vital spots by timestamp, and sleep by startedAt, so the saved reading does not grow a second copy of the same minute or the same night. Raw and Both still post that whole snapshot whenever any sample is new, so the same minute can be posted again inside the next body. Processed posts the summary for the selected window instead of the sample arrays. That snapshot can now be older than the week still on the ring.
 
 A month-long cache is not worth it. The ring cannot resend anything older than about a week, so a month of keys does not make the filter safer. If Solloid appends rows, send only timestamps that were not in the last successful upload, and remember those timestamps for about 10 days. If Solloid replaces a row by timestamp, the full snapshot is fine and the phone does not need a second cache.
 
@@ -141,17 +141,21 @@ A background wake, described above, asks for about 7 days instead. The phone als
 
 Sending to the Arduino IP
 
-The last reading and the upload queue are different. After a read, the phone compares the new payload with the previous one. If something changed, the whole payload is added to a queue stored on the phone. About once an hour, and when Send waiting readings is tapped, the app POSTs each queued body as JSON to the API URL in Settings. Sync ring sends that queue right away. That URL is the Arduino, reached through the home network and port forwarding, for example http://203.0.113.10:8080/ingest. An optional key is sent as the X-Api-Key header. If the phone cannot reach that address, the queued readings stay on the phone and are tried again later. Sending or keeping that queue does not change what the ring returns on the next read.
+The last reading and the upload queue are different. After a read, the phone compares the new payload with the previous one. If something changed, the whole payload is added to a queue stored on the phone. The queue keeps that full reading. About once an hour, and when Send waiting readings is tapped, the app POSTs each queued body as JSON to the API URL in Settings. Sync ring sends that queue right away. That URL is the Arduino, reached through the home network and port forwarding, for example http://203.0.113.10:8080/ingest. An optional key is sent as the X-Api-Key header. A blank URL is not posted. A URL has to start with http:// or https://. An address with no scheme is rejected, and a response outside 200 through 299 leaves that reading in the queue. If the phone cannot reach that address, the queued readings stay on the phone and are tried again later. Sending or keeping that queue does not change what the ring returns on the next read.
+
+The Arduino card on Config chooses what that POST contains. The default is Raw. Raw is the sample JSON in Sleep upload, with no processed field. Processed sends source, syncedAt, ring, and processed, and leaves the sample arrays out. Both sends the Raw JSON and adds processed. The choice is saved on the phone and applied when the reading is sent, including a reading that was already waiting. Today, This week, and All limit processed only. Today is the phone's local calendar day. This week is the seven local days ending today. All uses every day stored on the phone. Raw sample arrays are not trimmed.
+
+processed.heartRate, processed.spo2, and processed.temperature are one row per local day in the window, with key, average, peak, and minimum. key is YYYY-MM-DD on the phone, not the UTC date. processed.activity is one row per local day with key, steps, calories, and distanceMeters. Those rows do not repeat the samples. processed.stress carries the card's today fields: current, average, peak, highMinutes, distribution, trend, overnight, week, and month. Its days array is the daytime average, peak, and minimum for each local day in the window. processed.sleep.nights lists nights that overlap the window, each with startedAt, endedAt, score, scoreLabel, endedInDeepSleep, and sleepDebtMinutes. processed.sleep.debtMinutes is the newest of those nights. processed.window is day, week, or all.
 
 Config, at the bottom of the screen, can delete history records already saved on the phone. The user picks a start and an end in local time. Heart rate, steps, stress, HRV, blood oxygen, temperature, and sleep inside that range are removed from the saved reading. A sleep night is one record, so a range that covers any part of the night removes that night. Packets waiting to send stay in the queue and can still be uploaded. Nothing on the ring is erased, and a live read still pulls whatever the ring has. The ring keeps its own logs, so a later sync that reads those days can save them on the phone again.
 
 Sleep upload
 
-Sync posts one JSON body to the API URL (HTTP or the port-forwarded Arduino IP). Content-Type is application/json. A live sensor reading uses the same shape and sends "sleep": [].
+Sync posts one JSON body to the API URL (HTTP or the port-forwarded Arduino IP). Content-Type is application/json. Raw and Both use the shape below. A live sensor reading uses that same shape and sends "sleep": []. Processed replaces this body with source, syncedAt, ring, and processed.
 
 Timestamps are UTC ISO-8601. The app sets the ring clock to UTC, and sleep start/end are minutes after that midnight. If start is later than end, sleep began the evening before the wake-up day.
 
-The ring sends stages, not a score and not cycle numbers. The phone adds the estimate from Sleep score when it posts. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM.
+The ring sends stages, not a score and not cycle numbers. Raw and Both add the estimate from Sleep score when they post. Stage names are light, deep, rem, awake, and unknown (any code other than 2, 3, 4, or 5). minutesAsleep is light + deep + rem. minutesInBed is the start-to-end window. awakenings is how many awake stages were stored. A cycle is the phone grouping stages through the next REM block. complete is false when that stretch ended without REM. The JSON below is a Raw body.
 
 {
   "source": "colmi-r09",
@@ -211,4 +215,44 @@ The ring sends stages, not a score and not cycle numbers. The phone adds the est
       ]
     }
   ]
+}
+
+Processed for Today uses the same reading and adds the card math. Both is the Raw body above with this processed field added. The day key is the phone's local date.
+
+{
+  "source": "colmi-r09",
+  "syncedAt": "2026-11-06T15:04:00.000Z",
+  "ring": { "id": "AA:BB:CC:DD:EE:FF", "name": "R09" },
+  "processed": {
+    "window": "day",
+    "heartRate": [{ "key": "2026-11-06", "average": 54, "peak": 54, "minimum": 54 }],
+    "spo2": [{ "key": "2026-11-06", "average": 98, "peak": 98, "minimum": 98 }],
+    "temperature": [{ "key": "2026-11-06", "average": 36.6, "peak": 36.6, "minimum": 36.6 }],
+    "activity": [{ "key": "2026-11-06", "steps": 0, "calories": 0, "distanceMeters": 0 }],
+    "stress": {
+      "current": { "value": 22, "band": "Relaxed", "timestamp": "2026-11-06T04:00:00.000Z" },
+      "average": 22,
+      "peak": 22,
+      "highMinutes": 0,
+      "distribution": { "Relaxed": 100, "Low": 0, "Moderate": 0, "High": 0 },
+      "trend": null,
+      "overnight": null,
+      "week": null,
+      "month": null,
+      "days": [{ "key": "2026-11-06", "average": 22, "peak": 22, "minimum": 22 }]
+    },
+    "sleep": {
+      "debtMinutes": 350,
+      "nights": [
+        {
+          "startedAt": "2026-11-05T23:00:00.000Z",
+          "endedAt": "2026-11-06T01:30:00.000Z",
+          "score": 54,
+          "scoreLabel": "Fair",
+          "endedInDeepSleep": false,
+          "sleepDebtMinutes": 350
+        }
+      ]
+    }
+  }
 }
