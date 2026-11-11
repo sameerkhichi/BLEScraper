@@ -1,14 +1,10 @@
+
 name: TestFlight
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "docs/**"
-      - "**/*.md"
   schedule:
-    # TestFlight builds expire after 90 days. GitHub cron cannot express
-    # "every 60 days", so this runs at 15:00 UTC on the 1st of every other month.
+    # TestFlight builds expire after 90 days.
+    # Runs at 15:00 UTC on the 1st of every other month.
     - cron: "0 15 1 */2 *"
   workflow_dispatch:
 
