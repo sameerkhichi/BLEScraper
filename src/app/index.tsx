@@ -190,6 +190,7 @@ export default function HomeScreen() {
             stress={lastPayload?.stress ?? []}
           />
           <TakenLine timestamp={latestToday(lastPayload?.steps ?? [])} />
+          <Button label="Activity history" onPress={() => router.push('/activity')} tone="secondary" />
         </Card>
 
         <Card>
@@ -211,6 +212,7 @@ export default function HomeScreen() {
               tone="danger"
             />
           )}
+          <Button label="Heart rate history" onPress={() => router.push('/heart')} tone="secondary" />
         </Card>
 
         <Card>
@@ -223,6 +225,7 @@ export default function HomeScreen() {
             onPress={() => requireRing(() => void scan('spo2'))}
             tone="secondary"
           />
+          <Button label="Blood oxygen history" onPress={() => router.push('/oxygen')} tone="secondary" />
         </Card>
 
         <Card>
@@ -235,6 +238,7 @@ export default function HomeScreen() {
             onPress={() => requireRing(() => void scan('temperature'))}
             tone="secondary"
           />
+          <Button label="Body temperature history" onPress={() => router.push('/temperature')} tone="secondary" />
         </Card>
 
         <Card>

@@ -3,11 +3,16 @@ import test from 'node:test';
 
 import {
   activityForLocalDay,
+  activityHistoryDays,
+  heartRateHistoryDays,
   latestHeartRate,
   latestMetric,
   latestVital,
+  spo2HistoryDays,
   stressHistoryDays,
   stressSummary,
+  temperatureHistoryDays,
+  type HeartRateSample,
   type MetricSample,
   type SleepNight,
   type StepSample,
@@ -201,6 +206,102 @@ test('stress history keeps daytime samples and reports average, peak, and minimu
   assert.deepEqual(
     days[1].samples.map((sample) => sample.value),
     [10, 20, 40, 80, 90],
+  );
+});
+
+test('heart rate history groups the local day and drops empty slots', () => {
+  const samples: HeartRateSample[] = [
+    { timestamp: localIso(2026, 11, 8, 12), bpm: 61 },
+    { timestamp: localIso(2026, 11, 8, 10), bpm: 60 },
+    { timestamp: localIso(2026, 11, 7, 9), bpm: 50 },
+    { timestamp: localIso(2026, 11, 8, 13), bpm: 0 },
+    { timestamp: 'not-a-time', bpm: 90 },
+  ];
+
+  const days = heartRateHistoryDays(samples);
+
+  assert.deepEqual(
+    days.map((day) => day.key),
+    ['2026-11-07', '2026-11-08'],
+  );
+  assert.equal(days[1].average, 61);
+  assert.equal(days[1].peak, 61);
+  assert.equal(days[1].minimum, 60);
+  assert.deepEqual(
+    days[1].samples.map((sample) => sample.value),
+    [60, 61],
+  );
+});
+
+test('blood oxygen history ignores a temperature-only spot', () => {
+  const spots: VitalSpot[] = [
+    { timestamp: localIso(2026, 11, 7, 10), spo2: null, bodyTemperatureC: 36.5 },
+    { timestamp: localIso(2026, 11, 8, 12), spo2: 95, bodyTemperatureC: 36.6 },
+    { timestamp: localIso(2026, 11, 8, 10), spo2: 99, bodyTemperatureC: null },
+    { timestamp: 'not-a-time', spo2: 90, bodyTemperatureC: null },
+  ];
+
+  const days = spo2HistoryDays(spots);
+
+  assert.deepEqual(
+    days.map((day) => day.key),
+    ['2026-11-08'],
+  );
+  assert.equal(days[0].average, 97);
+  assert.equal(days[0].peak, 99);
+  assert.equal(days[0].minimum, 95);
+  assert.deepEqual(
+    days[0].samples.map((sample) => sample.value),
+    [99, 95],
+  );
+});
+
+test('temperature history ignores an oxygen-only spot and rounds the average to a tenth', () => {
+  const spots: VitalSpot[] = [
+    { timestamp: localIso(2026, 11, 7, 10), spo2: 98, bodyTemperatureC: null },
+    { timestamp: localIso(2026, 11, 8, 10), spo2: null, bodyTemperatureC: 36 },
+    { timestamp: localIso(2026, 11, 8, 12), spo2: 97, bodyTemperatureC: 37 },
+    { timestamp: 'not-a-time', spo2: null, bodyTemperatureC: 40 },
+  ];
+  const rounded = temperatureHistoryDays([
+    { timestamp: localIso(2026, 11, 9, 10), spo2: null, bodyTemperatureC: 36.25 },
+  ]);
+
+  const days = temperatureHistoryDays(spots);
+
+  assert.deepEqual(
+    days.map((day) => day.key),
+    ['2026-11-08'],
+  );
+  assert.equal(days[0].average, 36.5);
+  assert.equal(days[0].peak, 37);
+  assert.equal(days[0].minimum, 36);
+  assert.equal(rounded[0].average, 36.3);
+  assert.equal(rounded[0].peak, 36.25);
+  assert.equal(rounded[0].minimum, 36.25);
+});
+
+test('activity history sums each local day and keeps a stored zero day', () => {
+  const days = activityHistoryDays([
+    slot(localIso(2026, 11, 8, 10, 15), 50, 10, 20),
+    slot(localIso(2026, 11, 8, 10), 100, 40, 80),
+    slot(localIso(2026, 11, 7, 9), 0, 0, 0),
+    slot('not-a-time', 500, 200, 400),
+  ]);
+
+  assert.deepEqual(
+    days.map((day) => day.key),
+    ['2026-11-07', '2026-11-08'],
+  );
+  assert.equal(days[0].steps, 0);
+  assert.equal(days[0].calories, 0);
+  assert.equal(days[0].distanceMeters, 0);
+  assert.equal(days[1].steps, 150);
+  assert.equal(days[1].calories, 50);
+  assert.equal(days[1].distanceMeters, 100);
+  assert.deepEqual(
+    days[1].samples.map((sample) => sample.steps),
+    [100, 50],
   );
 });
 

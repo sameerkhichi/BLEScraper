@@ -14,7 +14,7 @@ Notes
 - App will be build using react native and typescript so I can use expo
 - The Bluetooth protocal will be handled through a known react native package to scan for BLE connections. Then a reverse engineered COLMI protocol to decode the raw data coming from the ring. 
 - The app will hold pending uploads of data until connections is re-established.
-- Sleep is saved on the phone when a wake downloads it. The ring can be on the table. Heart rate and steps already saved stay put.
+- Sleep is saved on the phone when a wake downloads it. The ring can be on the table. Heart rate, steps, calories, distance, stress, blood oxygen, body temperature, and sleep already saved stay put. A later download updates the same timestamp, or the same sleep start, and does not delete the older records.
 - Heart rate interval and the blood oxygen, stress, and HRV switches are stored on the ring. They stay with the power off and after the phone disconnects. Settings reads them when the ring is chosen again. The phone only keeps the last successful read. A download does not rewrite them. Heart rate can be 5, 15, 30, or 60 minutes. Five fills every stored slot. The firmware picks the other cadences: stress about every 30 minutes, HRV about every 60, blood oxygen about hourly, and skin temperature about every 30. The gesture switch is the ring's saved on/off. A download does not change it. What a wave does on the phone comes from an iOS Bluetooth bond, not from that switch.
 - The body-temperature card and a phone notification use the same lines. Fever is 38°C (100.4°F) or higher. Below 35°C (95°F) is mild hypothermia, below 32°C (89.6°F) is moderate, and below 28°C (82.4°F) is severe. 35.0°C through 37.9°C stays normal. The rules are under Body temperature.
 - Those controls are on the Settings screen at the top right of the home screen. Opening Settings reads the ring. Changing one control writes that field, then reads it back. If the ring is away, the screen shows the last read and the time. Write changes to the ring sends only the fields that were changed. An older ring that ignores HRV keeps the other three, and HRV is not written when the read fails.
@@ -48,7 +48,7 @@ The phone does not have to stay open. About every 4 hours iOS or Android wakes t
 
 That wake reads about 7 days of stored heart rate, steps, stress, and HRV, plus the sleep nights and the stored blood-oxygen and temperature slots still on the ring. It still runs if the ring is on the table. One successful wake can recover a missed day. The phone does not start a live heart-rate, oxygen, or temperature session on that wake.
 
-The ring writes heart rate on the interval saved in its own settings: 5, 15, 30, or 60 minutes. The stored heart-rate log still has a slot every 5 minutes, so a longer interval leaves some slots empty. Blood oxygen, stress, and HRV follow the cadences the firmware chooses. SpO2 and temperature come back as half-hour slots in vitalSpots. The phone keeps about 10 days of these spots. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted. A phone that is powered off cannot download them, because Bluetooth is off. A download does not change these settings.
+The ring writes heart rate on the interval saved in its own settings: 5, 15, 30, or 60 minutes. The stored heart-rate log still has a slot every 5 minutes, so a longer interval leaves some slots empty. Blood oxygen, stress, and HRV follow the cadences the firmware chooses. SpO2 and temperature come back as half-hour slots in vitalSpots. The phone keeps every spot it has saved. A later download updates a spot with the same timestamp and leaves older spots in place. Solloid should keep each spot by its timestamp. A later snapshot that no longer includes an old spot does not mean that spot should be deleted. A phone that is powered off cannot download them, because Bluetooth is off. A download does not change these settings.
 
 Confirmed through observation the ring does check heart rate every 5 minutes flat XX:05, XX:10 and so on. The red light for blood oxygen level does turn on hourly at XX:32. These times could change but they do indeed trigger. HRV, Step, calories, stress, distance all are also read on the ring confirmed through packets.
 
@@ -56,7 +56,7 @@ Leaving the app open does not start extra sensor checks. Opening the app runs a 
 
 Sleep on the phone
 
-A wake stores the sleep nights still on the ring, whether or not the ring is being worn. Sleep is part of the same download as heart rate and steps, about every 4 hours. The ring can be nearby but off a finger. That read does not turn the lights on, and it does not replace the heart-rate or step samples already saved. The nights are written into the saved reading, so the Sleep screen and the upload queue both keep them. Sync ring does the same thing if the ring is not on a finger. If the ring does not answer, the next check tries again. A failed sleep read does not wait out the full 4 hours.
+A wake stores the sleep nights still on the ring, whether or not the ring is being worn. Sleep is part of the same download as heart rate and steps, about every 4 hours. The ring can be nearby but off a finger. That read does not turn the lights on, and it does not replace the heart-rate or step samples already saved. The nights are merged into the saved reading by startedAt. A night the ring sends again replaces that start time. A night the ring no longer has stays on the phone. The Sleep screen and the upload queue both keep that merged list. Sync ring does the same thing if the ring is not on a finger. If the ring does not answer, the next check tries again. A failed sleep read does not wait out the full 4 hours.
 
 Sleep score
 
@@ -76,7 +76,7 @@ Continuity uses minutesAwake and awakenings. 20 awake minutes or fewer scores 10
 
 If the last stage that is not trailing awake time is deep, the phone subtracts 5 points after the weighted sum and the card says "Ended in deep sleep."
 
-Sleep debt uses 8 hours as the need. Nights are walked from oldest startedAt to newest. Each night adds minutesAsleep minus 480. Extra sleep pays the balance down, and the balance never goes above 0, so a long night does not create a credit. sleepDebtMinutes on a night is the minutes still owed after that night. The home sleep card and the newest history card show that balance. 0 is "No sleep debt."
+Sleep debt uses 8 hours as the need. Nights are walked from oldest startedAt to newest, including nights the ring has already dropped and the phone kept. Each night adds minutesAsleep minus 480. Extra sleep pays the balance down, and the balance never goes above 0, so a long night does not create a credit. sleepDebtMinutes on a night is the minutes still owed after that night. The home sleep card and the newest history card show that balance. 0 is "No sleep debt."
 
 The upload stamps score, scoreLabel, endedInDeepSleep, and sleepDebtMinutes onto each night at send time, including a body that was already waiting in the queue. A live reading that sends "sleep": [] stays an empty list. Solloid can read the newest night's sleepDebtMinutes as the balance on the card.
 
@@ -96,6 +96,10 @@ Overnight is the average of samples inside the latest sleep window. It is labele
 
 Stress history opens from the Stress card. It shows one month at a time, Sunday through Saturday. Each day with daytime samples shows that day's average, colored by the same bands, with the peak and the minimum under it. Previous and next month, and previous and next year, move the grid. Next month and next year stop at the current month. A day opens the samples the phone saved for that local day, drawn from midnight to midnight. Days with no daytime sample stay empty. The ring still keeps about a week, so a day only appears after the phone has stored it. The history reads the saved stress array and does not download older logs or change the upload.
 
+Heart rate history, blood oxygen history, and body temperature history each open from their own card. They use that same month grid. A day with samples shows the average, then the peak and the minimum. Heart rate and blood oxygen round the average to a whole number. Temperature rounds it to one decimal. The average is colored red for heart rate, by the blood-oxygen bands for SpO2, and by the temperature stage for body temperature. A day lists every saved reading with its local time. Overnight samples stay in that local day. Empty heart-rate slots stay out. A blood-oxygen day ignores a spot that has only temperature, and a temperature day ignores a spot that has only blood oxygen. Days the phone never stored stay empty. These screens read the saved heartRate array and vitalSpots. They do not download older logs or change the upload. The ring still keeps about a week. The phone keeps the heart-rate samples and vital spots it has already stored.
+
+Activity history opens from the Today card. The month grid shows that day's total steps, with the distance and calories under them. A day with a stored block appears, including a day whose totals are zero. A day with no blocks stays empty. Opening a day lists each 15-minute block with its local time, steps, distance, and calories, and the day's three totals sit above that list. It reads the saved steps array. It does not download older logs or change the upload.
+
 Body temperature
 
 The card shows the newest saved finger reading in °C, with Fahrenheit and the stage beside it. That reading is the latest vitalSpots entry with a temperature, from a download or from Measure, and the Taken time is that spot's timestamp. A newer Measure still wins until a later stored spot arrives. The bodyTemperatureC field on the snapshot is only the newest spot from the last download, so the card does not read that field. The phone notification still uses bodyTemperatureC. The thermometer runs from 24°C to 40°C.
@@ -108,11 +112,17 @@ The titles are "Body temperature is high", "Body temperature is low", "Body temp
 
 Ring storage
 
-The R09 does not keep a month. The useful store is about a week: heart rate in 5-minute slots (288 a day) once automatic checks are on, steps in 15-minute blocks (96 a day), stored blood oxygen and temperature in half-hour slots, and roughly a week of sleep nights. Days older than that come back empty. A full week of JSON is a few hundred kilobytes, not a large flash log. There is no published chip size worth planning around.
+The R09 does not keep a month. The useful store is about a week: heart rate in 5-minute slots (288 a day) once automatic checks are on, steps in 15-minute blocks (96 a day), stored blood oxygen and temperature in half-hour slots, and roughly a week of sleep nights. Days older than that come back empty from the ring. A full week of JSON is a few hundred kilobytes, not a large flash log. There is no published chip size worth planning around.
+
+What the phone keeps
+
+The ring still only has about a week to send. Once a sample is on the phone, a later download does not delete it. The same timestamp is updated with the value the ring just sent. A missed week cannot be filled in later, because the ring no longer has those days.
+
+Steps, calories, and distance are one 15-minute block. They stay, with no age cutoff. Heart rate stays the same way. Stress stays the same way. Blood oxygen and body temperature stay in vitalSpots, with no 10-day cutoff. A spot that has only one of those fields does not erase the other field already saved at that timestamp. Sleep stays too. A night is matched by startedAt. The ring sending that night again replaces it. A night the ring no longer has stays on the phone.
 
 Duplicates
 
-The phone already merges heart rate and steps by timestamp, so the saved reading does not grow duplicate minutes. The API still receives a whole snapshot whenever any sample is new, so the same minute can be posted again inside the next body.
+The phone merges heart rate, steps, stress, and vital spots by timestamp, and sleep by startedAt, so the saved reading does not grow a second copy of the same minute or the same night. The API still receives a whole snapshot whenever any sample is new, so the same minute can be posted again inside the next body. That snapshot can now be older than the week still on the ring.
 
 A month-long cache is not worth it. The ring cannot resend anything older than about a week, so a month of keys does not make the filter safer. If Solloid appends rows, send only timestamps that were not in the last successful upload, and remember those timestamps for about 10 days. If Solloid replaces a row by timestamp, the full snapshot is fine and the phone does not need a second cache.
 
@@ -126,7 +136,7 @@ On a download, about every 4 hours or when Sync ring is tapped, the phone connec
 
 Last reading Steps adds every step block in that reply, so the number is yesterday plus today. The Today card does not. It keeps the blocks that fall on the phone's local calendar day. A successful upload does not drop yesterday from the next read. The next open-app sync asks for two days again.
 
-A background wake, described above, asks for about 7 days instead. The phone also keeps earlier step and heart-rate samples by timestamp, so after a wake the Last reading total can cover more than the two days an open-app sync just requested. The ring still returns nothing older than about a week.
+A background wake, described above, asks for about 7 days instead. The phone also keeps earlier steps, heart rate, stress, blood oxygen, body temperature, and sleep, so after a wake the saved reading can cover more than the two days an open-app sync just requested. The ring still returns nothing older than about a week.
 
 Sending to the Arduino IP
 

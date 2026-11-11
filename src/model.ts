@@ -59,10 +59,6 @@ export type VitalSpot = {
   bodyTemperatureC: number | null;
 };
 
-// The ring does not keep these. The phone remembers each wake's spot long enough
-// for a later snapshot to still include it.
-export const VITAL_SPOT_RETAIN_MS = 10 * 24 * 60 * 60 * 1000;
-
 export type StepSample = {
   timestamp: string;
   steps: number;
@@ -202,6 +198,104 @@ export function stressHistoryDays(samples: MetricSample[], sleep: SleepNight[]):
         samples: daySamples,
       };
     });
+}
+
+export type ReadingHistoryDay = {
+  key: string;
+  average: number;
+  peak: number;
+  minimum: number;
+  samples: MetricSample[];
+};
+
+export type ActivityHistoryDay = {
+  key: string;
+  steps: number;
+  calories: number;
+  distanceMeters: number;
+  samples: StepSample[];
+};
+
+// Every stored sample on the phone's local day. Overnight stays in that day.
+export function heartRateHistoryDays(samples: HeartRateSample[]): ReadingHistoryDay[] {
+  const readings = samples.flatMap((sample) =>
+    Number.isFinite(sample.bpm) && sample.bpm > 0 ? [{ timestamp: sample.timestamp, value: sample.bpm }] : [],
+  );
+  return readingHistoryDays(readings, roundWhole);
+}
+
+export function spo2HistoryDays(spots: VitalSpot[]): ReadingHistoryDay[] {
+  return readingHistoryDays(vitalReadings(spots, 'spo2'), roundWhole);
+}
+
+export function temperatureHistoryDays(spots: VitalSpot[]): ReadingHistoryDay[] {
+  return readingHistoryDays(vitalReadings(spots, 'bodyTemperatureC'), roundTenth);
+}
+
+// One row per local day that has a stored block, including a day that totals zero.
+export function activityHistoryDays(samples: StepSample[]): ActivityHistoryDay[] {
+  const usable = samples.filter(
+    (sample) =>
+      Number.isFinite(sample.steps) && Number.isFinite(sample.calories) && Number.isFinite(sample.distanceMeters),
+  );
+  return [...groupByLocalDay(usable).entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([key, daySamples]) => {
+      const total = daySamples.reduce(
+        (sum, sample) => ({
+          steps: sum.steps + sample.steps,
+          calories: sum.calories + sample.calories,
+          distanceMeters: sum.distanceMeters + sample.distanceMeters,
+        }),
+        { steps: 0, calories: 0, distanceMeters: 0 },
+      );
+      return { key, ...total, samples: daySamples };
+    });
+}
+
+function vitalReadings(spots: VitalSpot[], field: 'spo2' | 'bodyTemperatureC'): MetricSample[] {
+  return spots.flatMap((spot) => {
+    const value = spot[field];
+    return typeof value === 'number' && Number.isFinite(value) ? [{ timestamp: spot.timestamp, value }] : [];
+  });
+}
+
+function readingHistoryDays(samples: MetricSample[], roundAverage: (value: number) => number): ReadingHistoryDay[] {
+  return [...groupByLocalDay(samples).entries()]
+    .sort((left, right) => left[0].localeCompare(right[0]))
+    .map(([key, daySamples]) => {
+      const values = daySamples.map((sample) => sample.value);
+      return {
+        key,
+        average: roundAverage(mean(values)),
+        peak: Math.max(...values),
+        minimum: Math.min(...values),
+        samples: daySamples,
+      };
+    });
+}
+
+function groupByLocalDay<T extends { timestamp: string }>(samples: T[]): Map<string, T[]> {
+  const grouped = new Map<string, T[]>();
+  const ordered = [...samples].sort((left, right) => left.timestamp.localeCompare(right.timestamp));
+  for (const sample of ordered) {
+    const time = Date.parse(sample.timestamp);
+    if (!Number.isFinite(time)) continue;
+    const key = stressDayKey(new Date(time));
+    if (!key) continue;
+    const existing = grouped.get(key);
+    if (existing) existing.push(sample);
+    else grouped.set(key, [sample]);
+  }
+  return grouped;
+}
+
+function roundWhole(value: number): number {
+  return Math.round(value);
+}
+
+function roundTenth(value: number): number {
+  return Math.round(value * 10) / 10;
 }
 
 function usableStress(samples: MetricSample[]): MetricSample[] {
@@ -526,13 +620,10 @@ export function isVitalSpot(value: unknown): value is VitalSpot {
   );
 }
 
-export function keepStoredSamples(
-  previous: UploadPayload | null,
-  next: UploadPayload,
-  now = Date.now(),
-): UploadPayload {
-  const vitalSpots = pruneVitalSpots(mergeVitalSpots([...(previous?.vitalSpots ?? []), ...(next.vitalSpots ?? [])]), now);
-  if (!previous) return { ...next, vitalSpots, stress: next.stress ?? [], hrv: next.hrv ?? [] };
+export function keepStoredSamples(previous: UploadPayload | null, next: UploadPayload): UploadPayload {
+  const vitalSpots = mergeVitalSpots([...(previous?.vitalSpots ?? []), ...(next.vitalSpots ?? [])]);
+  const sleep = mergeSleepNights(previous?.sleep ?? [], next.sleep ?? []);
+  if (!previous) return { ...next, vitalSpots, sleep, stress: next.stress ?? [], hrv: next.hrv ?? [] };
   return {
     ...next,
     heartRate: unionByTimestamp(previous.heartRate, next.heartRate),
@@ -540,15 +631,22 @@ export function keepStoredSamples(
     stress: unionByTimestamp(previous.stress ?? [], next.stress ?? []),
     hrv: unionByTimestamp(previous.hrv ?? [], next.hrv ?? []),
     vitalSpots,
+    sleep,
   };
 }
 
-function pruneVitalSpots(spots: VitalSpot[], now: number): VitalSpot[] {
-  const cutoff = now - VITAL_SPOT_RETAIN_MS;
-  return spots.filter((spot) => {
-    const time = Date.parse(spot.timestamp);
-    return Number.isFinite(time) && time >= cutoff;
-  });
+// A later download replaces the night with the same start and leaves every other night.
+export function mergeSleepNights(previous: SleepNight[], next: SleepNight[]): SleepNight[] {
+  const byStart = new Map<string, SleepNight>();
+  for (const night of previous) {
+    if (!night.startedAt) continue;
+    byStart.set(night.startedAt, night);
+  }
+  for (const night of next) {
+    if (!night.startedAt) continue;
+    byStart.set(night.startedAt, night);
+  }
+  return [...byStart.values()].sort((left, right) => right.startedAt.localeCompare(left.startedAt));
 }
 
 function unionByTimestamp<T extends { timestamp: string }>(previous: T[], next: T[]): T[] {
@@ -584,13 +682,13 @@ export function mergeReadings(
         : previous.realtimeHeartRateAt ?? null,
     spo2: next.spo2 ?? previous.spo2,
     bodyTemperatureC: next.bodyTemperatureC ?? previous.bodyTemperatureC,
-    vitalSpots: pruneVitalSpots(mergeVitalSpots([...(previous.vitalSpots ?? []), ...(next.vitalSpots ?? [])]), Date.now()),
+    vitalSpots: mergeVitalSpots([...(previous.vitalSpots ?? []), ...(next.vitalSpots ?? [])]),
     accelerometer: next.accelerometer ?? previous.accelerometer,
     heartRate: keepHistory ? previous.heartRate : next.heartRate,
     steps: keepHistory ? previous.steps : next.steps,
     stress: keepHistory ? unionByTimestamp(previous.stress ?? [], next.stress ?? []) : (next.stress ?? []),
     hrv: keepHistory ? unionByTimestamp(previous.hrv ?? [], next.hrv ?? []) : (next.hrv ?? []),
-    sleep: keepHistory ? previous.sleep : next.sleep,
+    sleep: keepHistory ? previous.sleep : mergeSleepNights(previous.sleep ?? [], next.sleep ?? []),
   };
 }
 

@@ -35,7 +35,7 @@ export default function SleepScreen() {
       {scored.length === 0 ? (
         <Card>
           <Text style={styles.label}>No sleep yet</Text>
-          <Text style={styles.meta}>Sync while the ring is nearby. It only keeps a few nights.</Text>
+          <Text style={styles.meta}>Sync while the ring is nearby. The ring keeps about a week, and nights already saved stay on the phone.</Text>
         </Card>
       ) : (
         scored.map((night) => (

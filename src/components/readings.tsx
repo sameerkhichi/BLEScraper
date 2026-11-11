@@ -93,7 +93,7 @@ export function formatTaken(timestamp: string | null | undefined): string | null
 
 export function latestNight(nights: SleepNight[]): SleepNight | null {
   if (nights.length === 0) return null;
-  return nights.reduce((latest, night) => (night.daysAgo < latest.daysAgo ? night : latest));
+  return nights.reduce((latest, night) => (night.startedAt > latest.startedAt ? night : latest));
 }
 
 
@@ -658,16 +658,16 @@ function qualityColor(label: string): string {
   return colors.danger;
 }
 
-function formatCount(value: number): string {
+export function formatCount(value: number): string {
   return Math.round(value).toLocaleString();
 }
 
-function formatDistance(meters: number): string {
+export function formatDistance(meters: number): string {
   if (meters >= 1000) return `${(meters / 1000).toFixed(1)} km`;
   return `${Math.round(meters)} m`;
 }
 
-function oxygenBand(spo2: number): { label: string; color: string } {
+export function oxygenBand(spo2: number): { label: string; color: string } {
   if (spo2 < 90) return { label: 'Low', color: colors.danger };
   if (spo2 < 95) return { label: 'Borderline', color: WARN };
   return { label: 'Fine', color: colors.ok };

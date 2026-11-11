@@ -160,24 +160,30 @@ test('a later download keeps older stored samples and updates the same minute', 
   assert.equal(merged.steps[0].steps, 25);
 });
 
-test('vital spots accumulate by timestamp and drop after 10 days', () => {
-  const now = Date.parse('2026-11-06T12:00:00.000Z');
+test('vital spots keep an old timestamp and update the same minute', () => {
   const previous = sample(70);
   previous.vitalSpots = [
     { timestamp: '2026-10-26T12:00:00.000Z', spo2: 97, bodyTemperatureC: 36.4 },
     { timestamp: '2026-11-05T12:00:00.000Z', spo2: 98, bodyTemperatureC: 36.5 },
   ];
   const next = sample(72);
-  next.vitalSpots = [{ timestamp: '2026-11-06T12:00:00.000Z', spo2: 99, bodyTemperatureC: 36.6 }];
+  next.vitalSpots = [
+    { timestamp: '2026-11-05T12:00:00.000Z', spo2: 96, bodyTemperatureC: null },
+    { timestamp: '2026-11-06T12:00:00.000Z', spo2: 99, bodyTemperatureC: 36.6 },
+  ];
 
-  const merged = keepStoredSamples(previous, next, now);
+  const merged = keepStoredSamples(previous, next);
   assert.deepEqual(
-    merged.vitalSpots.map((spot) => spot.spo2),
-    [98, 99],
+    merged.vitalSpots.map((spot) => [spot.timestamp, spot.spo2, spot.bodyTemperatureC]),
+    [
+      ['2026-10-26T12:00:00.000Z', 97, 36.4],
+      ['2026-11-05T12:00:00.000Z', 96, 36.5],
+      ['2026-11-06T12:00:00.000Z', 99, 36.6],
+    ],
   );
 });
 
-test('a live reading keeps the last sleep night and a sync replaces it', () => {
+test('a live reading keeps the last sleep night and a sync keeps older nights', () => {
   const previous = sample(72);
   previous.sleep = [
     {
@@ -200,7 +206,7 @@ test('a live reading keeps the last sleep night and a sync replaces it', () => {
   next.realtimeHeartRate = null;
 
   assert.equal(mergeReadings(previous, next, true).sleep[0].minutesAsleep, 400);
-  assert.equal(mergeReadings(previous, next, false).sleep.length, 0);
+  assert.equal(mergeReadings(previous, next, false).sleep[0].minutesAsleep, 400);
 });
 
 test('a sleep read keeps stored heart rate and steps', () => {
@@ -227,8 +233,29 @@ test('a sleep read keeps stored heart rate and steps', () => {
     },
   ];
 
+  previous.sleep = [
+    {
+      daysAgo: 3,
+      startedAt: '2026-11-02T23:00:00.000Z',
+      endedAt: '2026-11-03T07:00:00.000Z',
+      minutesAsleep: 300,
+      minutesInBed: 480,
+      minutesLight: 150,
+      minutesDeep: 80,
+      minutesRem: 70,
+      minutesAwake: 10,
+      minutesUnknown: 0,
+      awakenings: 0,
+      stages: [],
+      cycles: [],
+    },
+  ];
+
   const saved = keepStoredSamples(previous, keepSleepRecord(previous, incoming));
-  assert.equal(saved.sleep[0].minutesAsleep, 420);
+  assert.deepEqual(
+    saved.sleep.map((night) => night.minutesAsleep),
+    [420, 300],
+  );
   assert.equal(saved.heartRate.length, 1);
   assert.equal(saved.steps[0].steps, 10);
   assert.equal(saved.realtimeHeartRate, 72);

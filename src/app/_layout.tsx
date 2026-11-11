@@ -49,6 +49,14 @@ export default function RootLayout() {
         <Stack.Screen name="sleep" options={{ title: 'Sleep' }} />
         <Stack.Screen name="stress" options={{ title: 'Stress history' }} />
         <Stack.Screen name="stress-day" options={{ title: 'Stress' }} />
+        <Stack.Screen name="heart" options={{ title: 'Heart rate history' }} />
+        <Stack.Screen name="heart-day" options={{ title: 'Heart rate' }} />
+        <Stack.Screen name="oxygen" options={{ title: 'Blood oxygen history' }} />
+        <Stack.Screen name="oxygen-day" options={{ title: 'Blood oxygen' }} />
+        <Stack.Screen name="temperature" options={{ title: 'Body temperature history' }} />
+        <Stack.Screen name="temperature-day" options={{ title: 'Body temperature' }} />
+        <Stack.Screen name="activity" options={{ title: 'Activity history' }} />
+        <Stack.Screen name="activity-day" options={{ title: 'Activity' }} />
         <Stack.Screen name="config" options={{ title: 'Config' }} />
         <Stack.Screen name="debug" options={{ title: 'Debug' }} />
         <Stack.Screen name="controls" options={{ title: 'Settings' }} />
