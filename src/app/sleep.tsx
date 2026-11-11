@@ -38,15 +38,90 @@ export default function SleepScreen() {
           <Text style={styles.meta}>Sync while the ring is nearby. The ring keeps about a week, and nights already saved stay on the phone.</Text>
         </Card>
       ) : (
-        scored.map((night) => (
-          <NightCard key={`${night.daysAgo}-${night.startedAt}`} night={night} showDebt={night.startedAt === newestStart} />
-        ))
+        <SleepArchive newestStart={newestStart} nights={scored} />
       )}
     </ScrollView>
   );
 }
 
-function NightCard({ night, showDebt }: { night: ScoredSleepNight; showDebt: boolean }) {
+function SleepArchive({ nights, newestStart }: { nights: ScoredSleepNight[]; newestStart: string }) {
+  const { years, loose } = groupNights(nights);
+  return (
+    <>
+      {years.map((year) => (
+        <YearBlock key={year.year} newestStart={newestStart} year={year} />
+      ))}
+      {loose.map((night) => (
+        <NightCard key={`${night.daysAgo}-${night.startedAt}`} newestStart={newestStart} night={night} />
+      ))}
+    </>
+  );
+}
+
+function YearBlock({ year, newestStart }: { year: YearGroup; newestStart: string }) {
+  const [open, setOpen] = useState(false);
+  const nights = year.months.reduce((sum, month) => sum + month.nights.length, 0);
+
+  return (
+    <View style={styles.group}>
+      <Card>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          onPress={() => setOpen((value) => !value)}
+        >
+          <Text style={styles.date}>{year.year}</Text>
+          <Text style={styles.meta}>
+            {countLabel(year.months.length, 'month')} · {countLabel(nights, 'night')}
+          </Text>
+          <Text style={styles.meta}>{open ? 'Hide months' : 'Show months'}</Text>
+        </Pressable>
+      </Card>
+      {open
+        ? year.months.map((month) => (
+            <MonthBlock key={month.month} month={month} newestStart={newestStart} year={year.year} />
+          ))
+        : null}
+    </View>
+  );
+}
+
+function MonthBlock({
+  year,
+  month,
+  newestStart,
+}: {
+  year: number;
+  month: MonthGroup;
+  newestStart: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const name = new Date(year, month.month, 1).toLocaleDateString(undefined, { month: 'long' });
+
+  return (
+    <View style={styles.group}>
+      <Card style={styles.monthHeader}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: open }}
+          onPress={() => setOpen((value) => !value)}
+        >
+          <Text style={styles.date}>{name}</Text>
+          <Text style={styles.meta}>{countLabel(month.nights.length, 'night')}</Text>
+          <Text style={styles.meta}>{open ? 'Hide nights' : 'Show nights'}</Text>
+        </Pressable>
+      </Card>
+      {open
+        ? month.nights.map((night) => (
+            <NightCard key={`${night.daysAgo}-${night.startedAt}`} newestStart={newestStart} night={night} />
+          ))
+        : null}
+    </View>
+  );
+}
+
+function NightCard({ night, newestStart }: { night: ScoredSleepNight; newestStart: string }) {
+  const showDebt = night.startedAt === newestStart;
   const [open, setOpen] = useState(false);
   const [openCycle, setOpenCycle] = useState<number | null>(null);
   const longestAwake = night.stages.reduce(
@@ -142,6 +217,41 @@ function stagesInCycle(night: SleepNight, cycle: SleepCycle): SleepStage[] {
   });
 }
 
+type MonthGroup = { month: number; nights: ScoredSleepNight[] };
+type YearGroup = { year: number; months: MonthGroup[] };
+
+function groupNights(nights: ScoredSleepNight[]): { years: YearGroup[]; loose: ScoredSleepNight[] } {
+  const byYear = new Map<number, Map<number, ScoredSleepNight[]>>();
+  const loose: ScoredSleepNight[] = [];
+  for (const night of nights) {
+    const start = new Date(night.startedAt);
+    if (Number.isNaN(start.getTime())) {
+      loose.push(night);
+      continue;
+    }
+    const year = start.getFullYear();
+    const month = start.getMonth();
+    const months = byYear.get(year) ?? new Map<number, ScoredSleepNight[]>();
+    const grouped = months.get(month);
+    if (grouped) grouped.push(night);
+    else months.set(month, [night]);
+    byYear.set(year, months);
+  }
+  const years = [...byYear.entries()]
+    .sort((left, right) => right[0] - left[0])
+    .map(([year, months]) => ({
+      year,
+      months: [...months.entries()]
+        .sort((left, right) => right[0] - left[0])
+        .map(([month, grouped]) => ({ month, nights: grouped })),
+    }));
+  return { years, loose };
+}
+
+function countLabel(count: number, word: string): string {
+  return `${count} ${word}${count === 1 ? '' : 's'}`;
+}
+
 function nightDateLabel(night: SleepNight): string {
   const start = new Date(night.startedAt);
   const end = new Date(night.endedAt);
@@ -192,6 +302,12 @@ const styles = StyleSheet.create({
     color: colors.text,
     fontSize: 28,
     fontWeight: '700',
+  },
+  group: {
+    gap: 14,
+  },
+  monthHeader: {
+    marginLeft: 12,
   },
   cycles: {
     gap: 10,
