@@ -8,11 +8,10 @@ import { closeRing } from '../ble/ringClient';
 import { runCatchUp } from './autoSync';
 import { beginBackgroundAttempt, noteBackgroundExpired } from './backgroundBudget';
 import { notifyBackgroundWake } from './notifyBattery';
-import { autoSyncPaused } from './ringGate';
-import { CATCHUP_INTERVAL_MINUTES, evaluateSchedule, PROCESSING_INTERVAL_MINUTES, REFRESH_HISTORY_DAYS, shouldSync, STORED_DAYS } from './schedule';
-import { loadAutoSyncState, loadQueue, loadSettings } from './storage';
+import { CATCHUP_INTERVAL_MINUTES, PROCESSING_INTERVAL_MINUTES, REFRESH_HISTORY_DAYS, STORED_DAYS } from './schedule';
+import { loadSettings } from './storage';
 import { recordBackgroundWake } from './wakeLog';
-import { wakeNoticeBody, type WakeWork } from './wakeNotice';
+import { wakeNoticeBody } from './wakeNotice';
 
 export const AUTO_SYNC_TASK = 'blescraper-auto-sync';
 const INTERVAL_KEY = 'blescraper.backgroundInterval';
@@ -35,14 +34,18 @@ if (Platform.OS !== 'web') {
     debugLog(`Background wake at ${startedAt.toISOString()}`);
     try {
       const historyDays = historyDaysFrom(body);
-      const work = await wakeWork(historyDays);
-      const notice = work ? wakeNoticeBody(work) : null;
-      await recordBackgroundWake(startedAt, notice ?? 'Background wake had nothing to download or send.');
-      if (notice) await notifyBackgroundWake(startedAt, notice);
       const result = await runCatchUp({ historyDays });
-      const note = result.message || 'Background download finished.';
+      const note = result.message || 'Background wake finished without a download.';
       await recordBackgroundWake(startedAt, note);
       debugLog(note);
+      const settings = await loadSettings();
+      if (settings.wakeNotifications) {
+        const notice = wakeNoticeBody(settings.wakeNotice, {
+          downloaded: result.downloaded === true,
+          sent: result.sent ?? 0,
+        });
+        if (notice) await notifyBackgroundWake(startedAt, notice);
+      }
       return result.outcome === 'failed'
         ? BackgroundTask.BackgroundTaskResult.Failed
         : BackgroundTask.BackgroundTaskResult.Success;
@@ -53,20 +56,6 @@ if (Platform.OS !== 'web') {
       return BackgroundTask.BackgroundTaskResult.Failed;
     }
   });
-}
-
-async function wakeWork(historyDays: number): Promise<WakeWork | null> {
-  if (autoSyncPaused()) return null;
-  const settings = await loadSettings();
-  if (!settings.autoSync || !settings.ringId) return null;
-  const queue = await loadQueue();
-  const canSend = Boolean(settings.apiUrl.trim());
-  const decision = evaluateSchedule(await loadAutoSyncState(), Date.now());
-  return {
-    downloadDays: shouldSync(decision.plan) ? historyDays : null,
-    waiting: canSend ? queue.length : 0,
-    sendsAfter: canSend,
-  };
 }
 
 function bindExpiration(): void {

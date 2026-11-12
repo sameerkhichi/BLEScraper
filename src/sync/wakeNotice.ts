@@ -1,32 +1,19 @@
-export type WakeWork = {
-  downloadDays: number | null;
-  waiting: number;
-  sendsAfter: boolean;
+import type { WakeNotice } from '../model';
+
+export type WakeOutcome = {
+  downloaded: boolean;
+  sent: number;
 };
 
-export function wakeNoticeBody(work: WakeWork): string | null {
-  const uploading =
-    work.waiting > 0
-      ? work.waiting === 1
-        ? 'Uploading 1 waiting reading'
-        : `Uploading ${work.waiting} waiting readings`
-      : null;
-  const days = work.downloadDays;
-  if (!uploading && days == null) return null;
-  if (uploading && days != null) {
-    const after = work.sendsAfter ? ' Anything new is sent after the download.' : '';
-    return `${uploading}, then downloading the last ${dayPhrase(days)} of heart rate, steps, and sleep from the ring.${after}`;
-  }
-  if (days != null && work.sendsAfter) {
-    return `Downloading the last ${dayPhrase(days)} of heart rate, steps, and sleep from the ring, then sending anything new.`;
-  }
-  if (days != null) {
-    return `Downloading the last ${dayPhrase(days)} of heart rate, steps, and sleep from the ring.`;
-  }
-  return `${uploading}.`;
+export function wakeNoticeBody(choice: WakeNotice, outcome: WakeOutcome): string | null {
+  const downloaded = choice !== 'sent' && outcome.downloaded;
+  const sent = choice !== 'download' && outcome.sent > 0 ? outcome.sent : 0;
+  if (!downloaded && sent === 0) return null;
+  if (downloaded && sent > 0) return `Downloaded the ring record and sent ${readingPhrase(sent)}.`;
+  if (downloaded) return 'Downloaded the ring record.';
+  return `Sent ${readingPhrase(sent)}.`;
 }
 
-function dayPhrase(days: number): string {
-  if (days === 1) return 'day';
-  return `${days} days`;
+function readingPhrase(count: number): string {
+  return count === 1 ? '1 waiting reading' : `${count} waiting readings`;
 }

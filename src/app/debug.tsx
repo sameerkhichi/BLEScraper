@@ -87,7 +87,7 @@ export default function DebugScreen() {
                 The iPhone checks for ring data when iOS allows background activity. That depends on scheduling, settings, battery, and how the phone is used. Opening BLEScraper downloads when {CATCHUP_HOURS} hours have passed. Leaving the app open does not start extra sensor checks. Sleep is included. A ring battery below {LOW_BATTERY_PERCENT}% notifies you from these checks. Body temperature notifies at {FEVER_C}°C or higher, and below {MILD_HYPOTHERMIA_C}°C.
               </Text>
               <Text style={styles.body}>
-                A notification appears when a wake starts. It says whether that wake is downloading from the ring, uploading waiting readings, or both. Nothing is sent when the wake finishes. A wake sends waiting readings first. Leaving BLEScraper in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. The download does not wait for Wi-Fi.
+                A wake sends waiting readings, then downloads from the ring when it is nearby. Settings chooses whether a notice is sent after that download is saved, after waiting readings are sent, or either. Leaving BLEScraper in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. The download does not wait for Wi-Fi.
               </Text>
               <Text style={styles.body}>
                 {lastWake

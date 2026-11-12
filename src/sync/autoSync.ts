@@ -37,6 +37,8 @@ export type AutoSyncResult = {
   outcome: 'idle' | 'synced' | 'saved' | 'failed';
   waitMs: number;
   message: string;
+  downloaded?: boolean;
+  sent?: number;
 };
 
 type Snapshot = {
@@ -92,13 +94,7 @@ export async function runCatchUp(options: { historyDays?: number } = {}): Promis
   if (backgroundExpired()) return expiredResult();
 
   const uploaded = await runWithQueue(() => flushQueueNow(settings));
-  if (backgroundExpired()) return uploaded ?? expiredResult();
-
-  const decision = evaluateSchedule(await loadAutoSyncState(), Date.now());
-  if (!shouldSync(decision.plan)) {
-    if (uploaded) return { ...uploaded, waitMs: decision.waitMs || uploaded.waitMs };
-    return idle(decision.waitMs);
-  }
+  if (backgroundExpired()) return reported(uploaded ?? expiredResult(), false, packetsSent(uploaded));
 
   const historyDays = options.historyDays ?? STORED_DAYS;
   return runWithRing(() => downloadCatchUp(historyDays, uploaded));
@@ -110,7 +106,7 @@ async function downloadCatchUp(
 ): Promise<AutoSyncResult> {
   const current = await loadSettings();
   if (!current.autoSync || !current.ringId || autoSyncPaused() || backgroundExpired()) {
-    return uploaded ?? idle(PAUSED_WAIT_MS);
+    return reported(uploaded ?? idle(PAUSED_WAIT_MS), false, packetsSent(uploaded));
   }
 
   let radioHeld = false;
@@ -153,14 +149,23 @@ async function downloadCatchUp(
       await saveLastPayload(merged);
       await saveQueue(nextQueue);
       snapshotSink?.({ queue: nextQueue, lastPayload: merged });
-      if (backgroundExpired()) return expiredResult();
+      if (backgroundExpired()) return reported(expiredResult(), true, packetsSent(uploaded));
       await markSyncCompleted({ logs: true, sleep: collected.sleepLoaded });
       const flushed = await flushQueueNow(current);
-      if (flushed) return flushed;
+      const sent = packetsSent(uploaded) + packetsSent(flushed);
+      if (flushed) return reported(flushed, true, sent);
       if (!current.apiUrl.trim()) {
-        return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' };
+        return reported(
+          { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Saved on the phone. Add an API URL in Settings to send it.' },
+          true,
+          sent,
+        );
       }
-      return { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Downloaded the ring record.' };
+      return reported(
+        { outcome: 'saved' as const, waitMs: DOWNLOAD_INTERVAL_MS, message: 'Downloaded the ring record.' },
+        true,
+        sent,
+      );
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Sync failed.';
@@ -168,7 +173,11 @@ async function downloadCatchUp(
     const failed: AutoSyncState = { ...(await loadAutoSyncState()), failedAt: new Date().toISOString() };
     await saveAutoSyncState(failed);
     const note = uploaded?.message ? `${uploaded.message} ${message}` : message;
-    return { outcome: 'failed', waitMs: evaluateSchedule(failed, Date.now()).waitMs, message: note };
+    return reported(
+      { outcome: 'failed', waitMs: evaluateSchedule(failed, Date.now()).waitMs, message: note },
+      false,
+      packetsSent(uploaded),
+    );
   } finally {
     await closeRing();
     if (radioHeld) await releaseAndroidRadio();
@@ -176,7 +185,7 @@ async function downloadCatchUp(
 }
 
 function expiredResult(): AutoSyncResult {
-  return { outcome: 'failed', waitMs: DOWNLOAD_INTERVAL_MS, message: 'Background time expired.' };
+  return { outcome: 'failed', waitMs: DOWNLOAD_INTERVAL_MS, message: 'Background time expired.', downloaded: false, sent: 0 };
 }
 
 export async function runAutoSync(options: { allowAndroidService: boolean }): Promise<AutoSyncResult> {
@@ -414,6 +423,7 @@ async function flushQueueNow(settings: AppSettings): Promise<AutoSyncResult | nu
     return {
       outcome: 'saved',
       waitMs: DOWNLOAD_INTERVAL_MS,
+      sent: flushed.sent,
       message:
         flushed.sent > 0
           ? `Sent ${flushed.sent}. ${flushed.remaining.length} still waiting. ${flushed.error}`
@@ -423,6 +433,7 @@ async function flushQueueNow(settings: AppSettings): Promise<AutoSyncResult | nu
   return {
     outcome: 'synced',
     waitMs: DOWNLOAD_INTERVAL_MS,
+    sent: flushed.sent,
     message: flushed.sent > 0 ? 'Synced and sent.' : 'Nothing waiting to send.',
   };
 }
@@ -466,6 +477,14 @@ function report(message: string): void {
   statusSink?.(message);
 }
 
+function reported(result: AutoSyncResult, downloaded: boolean, sent: number): AutoSyncResult {
+  return { ...result, downloaded, sent };
+}
+
+function packetsSent(result: AutoSyncResult | null): number {
+  return result?.sent ?? 0;
+}
+
 function idle(waitMs: number): AutoSyncResult {
-  return { outcome: 'idle', waitMs, message: '' };
+  return { outcome: 'idle', waitMs, message: '', downloaded: false, sent: 0 };
 }

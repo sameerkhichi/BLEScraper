@@ -38,6 +38,13 @@ export function processedWindowFrom(value: unknown): ProcessedWindow {
   return 'all';
 }
 
+export type WakeNotice = 'download' | 'sent' | 'either';
+
+export function wakeNoticeFrom(value: unknown): WakeNotice {
+  if (value === 'download' || value === 'sent' || value === 'either') return value;
+  return 'either';
+}
+
 export type AppSettings = {
   apiUrl: string;
   apiKey: string;
@@ -51,6 +58,8 @@ export type AppSettings = {
   pendingFirmware: PendingFirmware;
   uploadMode: UploadMode;
   processedWindow: ProcessedWindow;
+  wakeNotifications: boolean;
+  wakeNotice: WakeNotice;
 };
 
 export type BatteryReading = {
@@ -795,6 +804,8 @@ export const defaultSettings: AppSettings = {
   pendingFirmware: emptyPending(),
   uploadMode: 'raw',
   processedWindow: 'all',
+  wakeNotifications: true,
+  wakeNotice: 'either',
 };
 
 export function checksFromFirmware(previous: RingChecks, read: FirmwareRead): RingChecks {

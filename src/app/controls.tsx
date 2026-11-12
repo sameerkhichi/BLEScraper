@@ -3,13 +3,14 @@ import { Pressable, ScrollView, StyleSheet, Switch, Text, View } from 'react-nat
 
 import { HEART_RATE_INTERVALS, hasPendingFirmware } from '../ble/ringSettings';
 import { Button, colors } from '../components/ui';
-import { shownChecks, shownGesture } from '../model';
+import { shownChecks, shownGesture, type WakeNotice } from '../model';
 import { CATCHUP_HOURS } from '../sync/schedule';
 import { useAppState } from '../state/AppProvider';
 
 export default function ControlsScreen() {
   const { busy, settings, saveAppSettings, readRingFirmware, writeRingField, applyRingChecks } = useAppState();
   const [autoSync, setAutoSync] = useState(settings.autoSync);
+  const [wakeNotifications, setWakeNotifications] = useState(settings.wakeNotifications);
   const [liveRead, setLiveRead] = useState(false);
   const [checkNote, setCheckNote] = useState('');
   const [gestureNote, setGestureNote] = useState('');
@@ -21,6 +22,10 @@ export default function ControlsScreen() {
   useEffect(() => {
     setAutoSync(settings.autoSync);
   }, [settings.autoSync]);
+
+  useEffect(() => {
+    setWakeNotifications(settings.wakeNotifications);
+  }, [settings.wakeNotifications]);
 
   useEffect(() => {
     if (!settings.ringId) return;
@@ -44,6 +49,11 @@ export default function ControlsScreen() {
   const toggleAutoSync = (value: boolean) => {
     setAutoSync(value);
     void saveAppSettings({ ...settings, autoSync: value });
+  };
+
+  const toggleWakeNotifications = (value: boolean) => {
+    setWakeNotifications(value);
+    void saveAppSettings({ ...settings, wakeNotifications: value });
   };
 
   const noteWrite = (message: string) => {
@@ -73,7 +83,7 @@ export default function ControlsScreen() {
         <View style={styles.rowText}>
           <Text style={styles.label}>Automatic background sync</Text>
           <Text style={styles.body}>
-            BLEScraper checks for ring data when iOS allows background activity. That depends on scheduling, settings, battery, and how the phone is used. Opening the app downloads when {CATCHUP_HOURS} hours have passed. Leaving the app open does not start extra sensor checks. Leaving it in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. A wake sends waiting readings first. The download does not wait for Wi-Fi. A notification is sent when a wake starts, and it says whether that wake is downloading from the ring, uploading waiting readings, or both. It does not send another one when the wake finishes. A download reads the stored record and does not change the ring's settings.
+            BLEScraper checks for ring data when iOS allows background activity. That depends on scheduling, settings, battery, and how the phone is used. A wake sends waiting readings, then downloads from the ring when it is nearby. Opening the app downloads when {CATCHUP_HOURS} hours have passed. Leaving the app open does not start extra sensor checks. Leaving it in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. The download does not wait for Wi-Fi. A download reads the stored record and does not change the ring's settings.
           </Text>
         </View>
         <Switch
@@ -84,6 +94,39 @@ export default function ControlsScreen() {
           value={autoSync}
         />
       </View>
+
+      <View style={styles.row}>
+        <View style={styles.rowText}>
+          <Text style={styles.label}>Wake notifications</Text>
+          <Text style={styles.body}>
+            A notice is sent after a wake saves a download from the ring, after it sends waiting readings, or either. This switch turns those notices off. Battery and temperature alerts stay on.
+          </Text>
+        </View>
+        <Switch
+          accessibilityLabel="Wake notifications"
+          onValueChange={(value) => toggleWakeNotifications(value)}
+          thumbColor={colors.text}
+          trackColor={{ false: colors.line, true: colors.accent }}
+          value={wakeNotifications}
+        />
+      </View>
+      <View style={styles.intervals}>
+        {WAKE_NOTICES.map((choice) => {
+          const selected = settings.wakeNotice === choice.value;
+          return (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ selected }}
+              key={choice.value}
+              onPress={() => void saveAppSettings({ ...settings, wakeNotice: choice.value })}
+              style={[styles.interval, selected && styles.intervalSelected]}
+            >
+              <Text style={[styles.intervalLabel, selected && styles.intervalLabelSelected]}>{choice.label}</Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={styles.body}>{wakeNoticeLine(settings.wakeNotice)}</Text>
 
       <Text style={styles.label}>Factory gesture control</Text>
       {gesture === null ? (
@@ -168,6 +211,18 @@ export default function ControlsScreen() {
       />
     </ScrollView>
   );
+}
+
+const WAKE_NOTICES: { value: WakeNotice; label: string }[] = [
+  { value: 'download', label: 'Downloaded' },
+  { value: 'sent', label: 'Sent' },
+  { value: 'either', label: 'Either' },
+];
+
+function wakeNoticeLine(choice: WakeNotice): string {
+  if (choice === 'download') return 'Notifies when a wake saves a download from the ring.';
+  if (choice === 'sent') return 'Notifies when a wake sends at least one waiting reading.';
+  return 'Notifies when a wake saves a download, sends waiting readings, or both.';
 }
 
 function firmwareLabel(readAt: string | null, live: boolean, pending: boolean): string {

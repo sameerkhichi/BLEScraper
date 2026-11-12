@@ -1,7 +1,7 @@
 import type { UploadPayload } from '../model';
 
 // The ring measures on its own. The phone only downloads the stored record.
-// iOS treats this gap as the earliest it may wake, and it often ignores a shorter request.
+// Opening the app waits this long after the last saved download. A background wake does not.
 export const DOWNLOAD_HOURS = 4;
 export const RETRY_MINUTES = 15;
 
@@ -11,7 +11,7 @@ export const UNWORN_INTERVAL_MS = DOWNLOAD_INTERVAL_MS;
 export const UPLOAD_INTERVAL_MS = 60 * 60 * 1000;
 export const CATCHUP_HOURS = DOWNLOAD_HOURS;
 export const CATCHUP_INTERVAL_MINUTES = DOWNLOAD_HOURS * 60;
-// iOS processing wakes are the long overnight slot. The 4-hour rule stays in evaluateSchedule.
+// iOS processing wakes are the long overnight slot. Opening the app still uses evaluateSchedule.
 export const PROCESSING_INTERVAL_MINUTES = 12 * 60;
 // A refresh wake reads the recent record. Keep this equal to the native historyDays value.
 export const REFRESH_HISTORY_DAYS = 2;

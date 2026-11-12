@@ -11,6 +11,7 @@ import {
   processedWindowFrom,
   RING_HEART_RATE_MINUTES,
   uploadModeFrom,
+  wakeNoticeFrom,
   type AppSettings,
   type RingChecks,
   type UploadPayload,
@@ -40,6 +41,8 @@ export async function loadSettings(): Promise<AppSettings> {
     pendingFirmware: pendingFrom(parsed.pendingFirmware),
     uploadMode: uploadModeFrom(parsed.uploadMode),
     processedWindow: processedWindowFrom(parsed.processedWindow),
+    wakeNotifications: typeof parsed.wakeNotifications === 'boolean' ? parsed.wakeNotifications : true,
+    wakeNotice: wakeNoticeFrom(parsed.wakeNotice),
   };
 }
 

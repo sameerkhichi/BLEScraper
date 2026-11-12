@@ -1,33 +1,35 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { wakeNoticeFrom } from '../model';
 import { wakeNoticeBody } from './wakeNotice';
 
-test('a download with nothing waiting names the ring read and the later send', () => {
+test('a saved download is named on its own', () => {
+  assert.equal(wakeNoticeBody('download', { downloaded: true, sent: 2 }), 'Downloaded the ring record.');
+  assert.equal(wakeNoticeBody('either', { downloaded: true, sent: 0 }), 'Downloaded the ring record.');
+});
+
+test('a successful send names how many readings were posted', () => {
+  assert.equal(wakeNoticeBody('sent', { downloaded: true, sent: 1 }), 'Sent 1 waiting reading.');
+  assert.equal(wakeNoticeBody('either', { downloaded: false, sent: 3 }), 'Sent 3 waiting readings.');
+});
+
+test('either covers a download and a send in one notice', () => {
   assert.equal(
-    wakeNoticeBody({ downloadDays: 2, waiting: 0, sendsAfter: true }),
-    'Downloading the last 2 days of heart rate, steps, and sleep from the ring, then sending anything new.',
+    wakeNoticeBody('either', { downloaded: true, sent: 2 }),
+    'Downloaded the ring record and sent 2 waiting readings.',
   );
 });
 
-test('waiting readings are named before the ring download', () => {
-  assert.equal(
-    wakeNoticeBody({ downloadDays: 7, waiting: 3, sendsAfter: true }),
-    'Uploading 3 waiting readings, then downloading the last 7 days of heart rate, steps, and sleep from the ring. Anything new is sent after the download.',
-  );
+test('a failed download or a failed send stays quiet', () => {
+  assert.equal(wakeNoticeBody('either', { downloaded: false, sent: 0 }), null);
+  assert.equal(wakeNoticeBody('download', { downloaded: false, sent: 4 }), null);
+  assert.equal(wakeNoticeBody('sent', { downloaded: true, sent: 0 }), null);
 });
 
-test('one waiting reading stays singular', () => {
-  assert.equal(wakeNoticeBody({ downloadDays: null, waiting: 1, sendsAfter: false }), 'Uploading 1 waiting reading.');
-});
-
-test('a download with nowhere to send does not mention an upload', () => {
-  assert.equal(
-    wakeNoticeBody({ downloadDays: 1, waiting: 0, sendsAfter: false }),
-    'Downloading the last day of heart rate, steps, and sleep from the ring.',
-  );
-});
-
-test('a wake with nothing to do stays quiet', () => {
-  assert.equal(wakeNoticeBody({ downloadDays: null, waiting: 0, sendsAfter: false }), null);
+test('a missing notice choice stays either', () => {
+  assert.equal(wakeNoticeFrom(undefined), 'either');
+  assert.equal(wakeNoticeFrom('later'), 'either');
+  assert.equal(wakeNoticeFrom('download'), 'download');
+  assert.equal(wakeNoticeFrom('sent'), 'sent');
 });
