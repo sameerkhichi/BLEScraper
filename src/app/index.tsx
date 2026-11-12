@@ -15,7 +15,7 @@ import {
 } from '../components/readings';
 import { SideMenu } from '../components/sideMenu';
 import { Button, Card, colors } from '../components/ui';
-import { latestHeartRate, latestMetric, latestVital, stressSummary } from '../model';
+import { latestHeartRate, latestMetric, latestVital, stressDayKey, stressSummary } from '../model';
 import { pauseAutoSync } from '../sync/ringGate';
 import { useAppState } from '../state/AppProvider';
 
@@ -39,9 +39,13 @@ function latestToday(samples: { timestamp: string }[]): string | null {
   return latest;
 }
 
-function plotNumbers<T extends { timestamp: string }>(samples: T[] | undefined, read: (sample: T) => number): number[] {
+function plotToday<T extends { timestamp: string }>(samples: T[] | undefined, read: (sample: T) => number): number[] {
+  const today = stressDayKey(new Date());
   return [...(samples ?? [])]
-    .filter((sample) => Number.isFinite(Date.parse(sample.timestamp)) && Number.isFinite(read(sample)))
+    .filter((sample) => {
+      const date = new Date(sample.timestamp);
+      return stressDayKey(date) === today && Number.isFinite(read(sample));
+    })
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
     .map(read);
 }
@@ -198,7 +202,7 @@ export default function HomeScreen() {
           <HeartRateChart
             bpm={measuringHeart ? liveBpm : storedHeart?.bpm ?? null}
             live={measuringHeart}
-            points={measuringHeart ? beats : plotNumbers(lastPayload?.heartRate, (sample) => sample.bpm)}
+            points={measuringHeart ? beats : plotToday(lastPayload?.heartRate, (sample) => sample.bpm)}
           />
           <TakenLine timestamp={heartTaken} />
           {heartError ? <Text style={styles.warning}>{heartError}</Text> : null}
@@ -245,7 +249,7 @@ export default function HomeScreen() {
           <Text style={styles.label}>Stress</Text>
           <StressPanel
             live={stressPhase === 'measuring' ? liveStress : null}
-            points={plotNumbers(lastPayload?.stress, (sample) => sample.value)}
+            points={plotToday(lastPayload?.stress, (sample) => sample.value)}
             reading={storedStress}
             summary={dayStress}
           />

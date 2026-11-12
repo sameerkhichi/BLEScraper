@@ -194,7 +194,7 @@ export function StressPanel({
         </View>
       </View>
       {series.length === 0 ? (
-        <Text style={styles.meta}>{points ? 'No stress samples yet.' : 'No daytime stress yet.'}</Text>
+        <Text style={styles.meta}>{points ? 'No stress yet today.' : 'No daytime stress yet.'}</Text>
       ) : (
         <SeriesLine max={100} min={0} points={series} ticks={STRESS_TICKS} />
       )}
@@ -363,7 +363,7 @@ export function HeartRateChart({
         </View>
       </View>
       {points.length === 0 ? (
-        <Text style={styles.meta}>{live ? 'Measuring. The first beat takes a few seconds.' : 'No heart-rate log yet.'}</Text>
+        <Text style={styles.meta}>{live ? 'Measuring. The first beat takes a few seconds.' : 'No heart rate yet today.'}</Text>
       ) : (
         <SeriesLine max={SCALE_MAX} min={SCALE_MIN} points={points} ticks={SCALE_TICKS} />
       )}
