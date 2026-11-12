@@ -38,31 +38,7 @@ export async function ensureNotificationPermission(request: boolean): Promise<bo
   return next.status === 'granted';
 }
 
-export async function notifyBackgroundResult(note: string): Promise<void> {
-  try {
-    const notifications = await loadNotifications();
-    if (!notifications) return;
-    await ensureWakeChannel(notifications);
-    const allowed = await ensureNotificationPermission(false);
-    if (!allowed) return;
-    await notifications.scheduleNotificationAsync({
-      identifier: `ring-wake-result-${Date.now()}`,
-      content: {
-        title: 'BLEScraper background download',
-        body: note,
-        sound: 'default',
-        interruptionLevel: 'active',
-        data: { kind: 'background-wake-result' },
-      },
-      trigger: Platform.OS === 'android' ? { channelId: WAKE_CHANNEL_ID } : null,
-    });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Could not send the wake result.';
-    debugLog(message);
-  }
-}
-
-export async function notifyBackgroundWake(startedAt: Date): Promise<void> {
+export async function notifyBackgroundWake(startedAt: Date, body: string): Promise<void> {
   try {
     const notifications = await loadNotifications();
     if (!notifications) return;
@@ -72,17 +48,11 @@ export async function notifyBackgroundWake(startedAt: Date): Promise<void> {
       debugLog('Background wake notification skipped. Notification permission is off.');
       return;
     }
-    const when = startedAt.toLocaleString(undefined, {
-      month: 'short',
-      day: 'numeric',
-      hour: 'numeric',
-      minute: '2-digit',
-    });
     await notifications.scheduleNotificationAsync({
       identifier: `ring-wake-${startedAt.getTime()}`,
       content: {
         title: 'BLEScraper woke up',
-        body: `Background download started ${when}.`,
+        body,
         sound: 'default',
         interruptionLevel: 'active',
         data: { kind: 'background-wake', startedAt: startedAt.toISOString() },

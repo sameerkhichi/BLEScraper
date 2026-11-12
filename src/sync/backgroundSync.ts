@@ -7,9 +7,12 @@ import { debugLog } from '../ble/debugLog';
 import { closeRing } from '../ble/ringClient';
 import { runCatchUp } from './autoSync';
 import { beginBackgroundAttempt, noteBackgroundExpired } from './backgroundBudget';
-import { notifyBackgroundResult, notifyBackgroundWake } from './notifyBattery';
-import { CATCHUP_INTERVAL_MINUTES, PROCESSING_INTERVAL_MINUTES, REFRESH_HISTORY_DAYS, STORED_DAYS } from './schedule';
+import { notifyBackgroundWake } from './notifyBattery';
+import { autoSyncPaused } from './ringGate';
+import { CATCHUP_INTERVAL_MINUTES, evaluateSchedule, PROCESSING_INTERVAL_MINUTES, REFRESH_HISTORY_DAYS, shouldSync, STORED_DAYS } from './schedule';
+import { loadAutoSyncState, loadQueue, loadSettings } from './storage';
 import { recordBackgroundWake } from './wakeLog';
+import { wakeNoticeBody, type WakeWork } from './wakeNotice';
 
 export const AUTO_SYNC_TASK = 'blescraper-auto-sync';
 const INTERVAL_KEY = 'blescraper.backgroundInterval';
@@ -31,12 +34,14 @@ if (Platform.OS !== 'web') {
     beginBackgroundAttempt();
     debugLog(`Background wake at ${startedAt.toISOString()}`);
     try {
-      await recordBackgroundWake(startedAt, 'Background download started.');
-      await notifyBackgroundWake(startedAt);
-      const result = await runCatchUp({ historyDays: historyDaysFrom(body) });
+      const historyDays = historyDaysFrom(body);
+      const work = await wakeWork(historyDays);
+      const notice = work ? wakeNoticeBody(work) : null;
+      await recordBackgroundWake(startedAt, notice ?? 'Background wake had nothing to download or send.');
+      if (notice) await notifyBackgroundWake(startedAt, notice);
+      const result = await runCatchUp({ historyDays });
       const note = result.message || 'Background download finished.';
       await recordBackgroundWake(startedAt, note);
-      await notifyBackgroundResult(note);
       debugLog(note);
       return result.outcome === 'failed'
         ? BackgroundTask.BackgroundTaskResult.Failed
@@ -45,10 +50,23 @@ if (Platform.OS !== 'web') {
       const message = error instanceof Error ? error.message : 'Background sync failed.';
       debugLog(message);
       await recordBackgroundWake(startedAt, message).catch(() => undefined);
-      await notifyBackgroundResult(message);
       return BackgroundTask.BackgroundTaskResult.Failed;
     }
   });
+}
+
+async function wakeWork(historyDays: number): Promise<WakeWork | null> {
+  if (autoSyncPaused()) return null;
+  const settings = await loadSettings();
+  if (!settings.autoSync || !settings.ringId) return null;
+  const queue = await loadQueue();
+  const canSend = Boolean(settings.apiUrl.trim());
+  const decision = evaluateSchedule(await loadAutoSyncState(), Date.now());
+  return {
+    downloadDays: shouldSync(decision.plan) ? historyDays : null,
+    waiting: canSend ? queue.length : 0,
+    sendsAfter: canSend,
+  };
 }
 
 function bindExpiration(): void {

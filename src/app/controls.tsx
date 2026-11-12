@@ -73,7 +73,7 @@ export default function ControlsScreen() {
         <View style={styles.rowText}>
           <Text style={styles.label}>Automatic background sync</Text>
           <Text style={styles.body}>
-            BLEScraper checks for ring data when iOS allows background activity. That depends on scheduling, settings, battery, and how the phone is used. Opening the app downloads when {CATCHUP_HOURS} hours have passed. Leaving the app open does not start extra sensor checks. Leaving it in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. A wake sends waiting readings first. The download does not wait for Wi-Fi. A notification is sent when a wake starts and when it finishes. A download reads the stored record and does not change the ring's settings.
+            BLEScraper checks for ring data when iOS allows background activity. That depends on scheduling, settings, battery, and how the phone is used. Opening the app downloads when {CATCHUP_HOURS} hours have passed. Leaving the app open does not start extra sensor checks. Leaving it in the switcher does not promise a wake, and swiping it away can stop the next one until you open it again. A wake sends waiting readings first. The download does not wait for Wi-Fi. A notification is sent when a wake starts, and it says whether that wake is downloading from the ring, uploading waiting readings, or both. It does not send another one when the wake finishes. A download reads the stored record and does not change the ring's settings.
           </Text>
         </View>
         <Switch
