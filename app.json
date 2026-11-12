@@ -77,6 +77,12 @@
         "projectId": "f5b9f9b3-f0ce-4ea6-af39-5cd234d5331f"
       }
     },
-    "owner": "sameerkhichi"
+    "owner": "sameerkhichi",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/f5b9f9b3-f0ce-4ea6-af39-5cd234d5331f"
+    }
   }
 }

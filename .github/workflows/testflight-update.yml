@@ -1,0 +1,49 @@
+name: Production update
+
+# Publishes a JavaScript update to the production channel. This does not
+# create an iOS binary. The installed TestFlight build must already include
+# expo-updates and the production channel from eas.json.
+
+on:
+  workflow_dispatch:
+    inputs:
+      message:
+        description: Update description
+        required: true
+        type: string
+
+concurrency:
+  group: testflight-update
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish to the production channel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Expo and EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Publish update
+        env:
+          UPDATE_MESSAGE: ${{ inputs.message }}
+        run: eas update --channel production --environment production --platform ios --message "$UPDATE_MESSAGE" --non-interactive

@@ -7,12 +7,14 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "node": "22.14.0"
+      "node": "22.14.0",
+      "channel": "development"
     },
     "production": {
       "distribution": "store",
       "autoIncrement": true,
-      "node": "22.14.0"
+      "node": "22.14.0",
+      "channel": "production"
     }
   },
   "submit": {
