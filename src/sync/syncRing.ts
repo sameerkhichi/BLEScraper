@@ -95,10 +95,12 @@ export async function collectRing(
     }
   }
 
+  let clockSet = false;
   if (worn && plan.logs) {
     report(onStatus, 'Setting the ring clock');
     try {
       await client.setTime(new Date());
+      clockSet = true;
     } catch {
       warnings.push('The ring clock was not updated.');
       debugLog('The ring clock was not updated.');
@@ -148,8 +150,23 @@ export async function collectRing(
     vitalSpots = mergeVitalSpots(vitalSpots);
     spo2 = [...vitalSpots].reverse().find((spot) => typeof spot.spo2 === 'number')?.spo2 ?? null;
     bodyTemperatureC = [...vitalSpots].reverse().find((spot) => typeof spot.bodyTemperatureC === 'number')?.bodyTemperatureC ?? null;
-    stress = await readMetricDays(client, CMD_READ_STRESS, historyDays, 'stress', warnings);
-    hrv = await readMetricDays(client, CMD_READ_HRV, historyDays, 'HRV', warnings);
+    if (clockSet) {
+      try {
+        await client.setTime(new Date());
+      } catch {
+        clockSet = false;
+        warnings.push('The ring clock was not updated.');
+        debugLog('The ring clock was not updated.');
+      }
+    }
+    if (clockSet) {
+      stress = await readMetricDays(client, CMD_READ_STRESS, historyDays, 'stress', warnings);
+      hrv = await readMetricDays(client, CMD_READ_HRV, historyDays, 'HRV', warnings);
+    } else {
+      const skipped = 'Stress and HRV were skipped because the ring clock was not set.';
+      warnings.push(skipped);
+      debugLog(skipped);
+    }
   }
 
   if (worn && plan.vitals) {

@@ -41,6 +41,16 @@ test('paired blood oxygen uses the higher plausible value', () => {
   assert.equal(spots[0]?.timestamp, '2026-11-08T00:00:00.000Z');
 });
 
+test('a short temperature day keeps the filled half hours', () => {
+  const spots = parseStoredTemperature(series(STORED_TEMPERATURE, [0, 0x1e, 154, 0]), now);
+  assert.deepEqual(spots, [{ timestamp: '2026-11-08T00:00:00.000Z', spo2: null, bodyTemperatureC: 35.4 }]);
+});
+
+test('a short blood-oxygen day keeps the filled half hour', () => {
+  const spots = parseStoredSpo2(series(STORED_SPO2, [0, 0x1e, 0, 97]), now);
+  assert.deepEqual(spots, [{ timestamp: '2026-11-08T00:30:00.000Z', spo2: 97, bodyTemperatureC: null }]);
+});
+
 test('a sleep packet is not read as stored blood oxygen', () => {
   assert.throws(() => parseStoredSpo2(series(0x27, [0, 0x1e]), now), /Blood oxygen/);
 });

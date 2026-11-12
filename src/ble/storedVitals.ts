@@ -8,7 +8,6 @@ export const STORED_TEMPERATURE = 0x25;
 const SLOTS_PER_DAY = 48;
 const SLOT_MINUTES = 30;
 const DAY_HEADER = 2;
-const SINGLE_DAY_BYTES = DAY_HEADER + SLOTS_PER_DAY;
 const PAIR_DAY_BYTES = DAY_HEADER + SLOTS_PER_DAY * 2;
 
 // Same 7-byte shape the ring already answers for sleep.
@@ -50,12 +49,13 @@ function parseSingleDays(
   now: Date,
   decode: (raw: number) => { spo2: number | null; bodyTemperatureC: number | null } | null,
 ): VitalSpot[] {
-  if (payload.length < SINGLE_DAY_BYTES) return [];
   const spots: VitalSpot[] = [];
-  for (let offset = 0; offset + SINGLE_DAY_BYTES <= payload.length; offset += SINGLE_DAY_BYTES) {
+  let offset = 0;
+  while (offset + DAY_HEADER < payload.length) {
     const daysAgo = payload[offset] ?? 0;
     const midnight = utcMidnight(now) - daysAgo * 24 * 60 * 60 * 1000;
-    for (let slot = 0; slot < SLOTS_PER_DAY; slot += 1) {
+    const available = Math.min(SLOTS_PER_DAY, payload.length - offset - DAY_HEADER);
+    for (let slot = 0; slot < available; slot += 1) {
       const reading = decode(payload[offset + DAY_HEADER + slot] ?? 0);
       if (!reading) continue;
       spots.push({
@@ -64,16 +64,21 @@ function parseSingleDays(
         bodyTemperatureC: reading.bodyTemperatureC,
       });
     }
+    offset += DAY_HEADER + available;
+    if (available < SLOTS_PER_DAY) break;
   }
   return spots;
 }
 
 function parsePairDays(payload: Uint8Array, now: Date): VitalSpot[] {
   const spots: VitalSpot[] = [];
-  for (let offset = 0; offset + PAIR_DAY_BYTES <= payload.length; offset += PAIR_DAY_BYTES) {
+  let offset = 0;
+  while (offset + DAY_HEADER + 1 < payload.length) {
     const daysAgo = payload[offset] ?? 0;
     const midnight = utcMidnight(now) - daysAgo * 24 * 60 * 60 * 1000;
-    for (let slot = 0; slot < SLOTS_PER_DAY; slot += 1) {
+    const available = Math.min(SLOTS_PER_DAY, Math.floor((payload.length - offset - DAY_HEADER) / 2));
+    if (available < 1) break;
+    for (let slot = 0; slot < available; slot += 1) {
       const min = payload[offset + DAY_HEADER + slot * 2] ?? 0;
       const max = payload[offset + DAY_HEADER + slot * 2 + 1] ?? 0;
       const spo2 = isPlausibleSpo2(max) ? max : isPlausibleSpo2(min) ? min : null;
@@ -84,6 +89,8 @@ function parsePairDays(payload: Uint8Array, now: Date): VitalSpot[] {
         bodyTemperatureC: null,
       });
     }
+    offset += DAY_HEADER + available * 2;
+    if (available < SLOTS_PER_DAY) break;
   }
   return spots;
 }
